@@ -70,6 +70,14 @@ cat("====================================================================\n\n")
 
 cat("Loading MSigDB gene sets...\n")
 
+# Build a global mapping from ensembl_gene to gene_symbol
+cat("Building Ensembl to Gene Symbol mapping...\n")
+all_genes_df <- suppressMessages(msigdbr(species = "Homo sapiens"))
+ens2sym_df <- all_genes_df[!is.na(all_genes_df$ensembl_gene) & all_genes_df$ensembl_gene != "", ]
+ens2sym_df <- ens2sym_df[!duplicated(ens2sym_df$ensembl_gene), ]
+ens2sym_dict <- setNames(ens2sym_df$gene_symbol, ens2sym_df$ensembl_gene)
+rm(all_genes_df, ens2sym_df) # free memory
+
 # Helper: convert msigdbr output to named list for fgsea
 msigdbr_to_list <- function(df) {
     df <- df[!is.na(df$ensembl_gene) & df$ensembl_gene != "", ]
@@ -118,8 +126,9 @@ cat("\n")
 #' Run fgsea preranked GSEA from a DEG table
 #' @param deg_file Path to DEG CSV file
 #' @param pathways Named list of gene sets
+#' @param mapping_dict Named vector mapping Ensembl IDs to Gene Symbols
 #' @return fgsea result data.frame or NULL
-run_preranked_gsea <- function(deg_file, pathways) {
+run_preranked_gsea <- function(deg_file, pathways, mapping_dict = ens2sym_dict) {
     if (!file.exists(deg_file)) return(NULL)
 
     deg <- fread(deg_file)
@@ -128,6 +137,9 @@ run_preranked_gsea <- function(deg_file, pathways) {
         return(NULL)
     }
 
+    # Strip Ensembl version suffix (e.g., ENSG00000112742.10 -> ENSG00000112742)
+    deg$gene <- sub("\\.[0-9]+$", "", deg$gene)
+    
     # Build named vector of moderated-t statistics
     stats_vec <- setNames(deg$t, deg$gene)
 
@@ -162,9 +174,12 @@ run_preranked_gsea <- function(deg_file, pathways) {
     if (is.null(res) || nrow(res) == 0) return(NULL)
 
     # Convert leadingEdge list to semicolon-separated string for CSV/XLSX output
-    res$leadingEdge <- vapply(res$leadingEdge,
-                              function(x) paste(x, collapse = ";"),
-                              character(1))
+    # And map Ensembl IDs to Gene Symbols
+    res$leadingEdge <- vapply(res$leadingEdge, function(x) {
+        symbols <- mapping_dict[x]
+        symbols[is.na(symbols) | symbols == ""] <- x[is.na(symbols) | symbols == ""]
+        paste(symbols, collapse = ";")
+    }, character(1))
 
     # Sort by padj
     res <- res[order(res$padj), ]
