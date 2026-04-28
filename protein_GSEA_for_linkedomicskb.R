@@ -93,6 +93,8 @@ collections_to_fetch <- list(
     list(name="C2_CP_PID",              cat="C2", sub="CP:PID"),
     list(name="C2_CP_REACTOME",         cat="C2", sub="CP:REACTOME"),
     list(name="C2_CP_WIKIPATHWAYS",     cat="C2", sub="CP:WIKIPATHWAYS"),
+    list(name="C3_MIR_MIRDB",           cat="C3", sub="MIR:MIRDB"),
+    list(name="C3_MIR_MIR_LEGACY",      cat="C3", sub="MIR:MIR_LEGACY"),
     list(name="C3_TFT_GTRD",            cat="C3", sub="TFT:GTRD"),
     list(name="C3_TFT_TFT_LEGACY",      cat="C3", sub="TFT:TFT_LEGACY"),
     list(name="C4_3CA",                 cat="C4", sub="3CA"),

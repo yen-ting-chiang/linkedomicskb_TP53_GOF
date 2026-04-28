@@ -1,5 +1,5 @@
 ################################################################################
-# TP53 Protein GSEA - Cross-Dataset Comparison Summary (LinkedOmicsKB)
+# TP53 mRNA GSEA - Cross-Dataset Comparison Summary (LinkedOmicsKB)
 #
 # This script aggregates the GSEA results across all 10 datasets 
 # for each of the 9 TP53 mutation comparisons and each MSigDB collection.
@@ -10,7 +10,7 @@
 #   - Frequency_Neg: Number of datasets where padj < 0.05 and NES < 0
 #   - Datasets_Neg: List of datasets where negative significance was found
 #
-# Outputs: Cross_Dataset_Comparison_Summary_[Collection].csv/xlsx in protein_GSEA/
+# Outputs: Cross_Dataset_Comparison_Summary_[Collection].csv/xlsx in mRNA_GSEA/
 ################################################################################
 
 suppressPackageStartupMessages({
@@ -20,7 +20,7 @@ suppressPackageStartupMessages({
 })
 
 base_path <- "C:/Users/danny/Documents/R_project/linkedomicskb_TP53_GOF"
-gsea_dir <- file.path(base_path, "protein_GSEA")
+gsea_dir <- file.path(base_path, "mRNA_GSEA")
 
 datasets <- data.frame(
     folder = c("BRCA", "CCRCC", "COAD", "GBM", "HNSCC",
@@ -50,7 +50,7 @@ collections <- c(
 )
 
 cat("====================================================================\n")
-cat("TP53 Protein GSEA - Cross-Dataset Comparison Summary\n")
+cat("TP53 mRNA GSEA - Cross-Dataset Comparison Summary\n")
 cat("====================================================================\n\n")
 
 if (!dir.exists(gsea_dir)) {
