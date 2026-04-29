@@ -29,6 +29,8 @@ suppressPackageStartupMessages({
     library(glue)
     library(limma)
     library(openxlsx)
+    library(AnnotationDbi)
+    library(org.Hs.eg.db)
 })
 
 set.seed(1234)
@@ -335,6 +337,19 @@ run_limma_group_comparison <- function(mat, group_vec,
     tbl
 }
 
+#' Add gene_symbol column by mapping ENSEMBL IDs to HGNC gene symbols
+#'
+#' @param deg_df Data frame with a "gene" column containing ENSEMBL IDs
+#' @param mapping Named character vector (names = ENSEMBL IDs with version, values = gene symbols)
+#' @return Data frame with gene_symbol column inserted before gene column
+add_gene_symbol <- function(deg_df, mapping) {
+    deg_df$gene_symbol <- mapping[deg_df$gene]
+    deg_df$gene_symbol[is.na(deg_df$gene_symbol)] <- ""
+    # Reorder: gene_symbol first, then gene, then the rest
+    deg_df <- deg_df[, c("gene_symbol", "gene", setdiff(names(deg_df), c("gene_symbol", "gene")))]
+    deg_df
+}
+
 # ==============================================================================
 # Section 4: Main Processing Loop
 # ==============================================================================
@@ -371,6 +386,19 @@ for (i in seq_len(nrow(datasets))) {
     # Filter
     mat <- impute_and_filter(mat0, min_frac = min_frac_complete)
     cat("  After filtering:", nrow(mat), "genes x", ncol(mat), "samples\n")
+
+    # --- Build ENSEMBL-to-gene-symbol lookup for this dataset ---
+    ensembl_ids_versioned <- rownames(mat)
+    ensembl_ids_bare <- sub("\\.\\d+$", "", ensembl_ids_versioned)
+    symbol_map <- tryCatch(
+        AnnotationDbi::mapIds(org.Hs.eg.db, keys = ensembl_ids_bare,
+                              column = "SYMBOL", keytype = "ENSEMBL",
+                              multiVals = "first"),
+        error = function(e) { cat("  [WARN] Gene symbol mapping failed:", e$message, "\n"); setNames(rep(NA_character_, length(ensembl_ids_bare)), ensembl_ids_bare) }
+    )
+    # Create mapping keyed by versioned ENSEMBL IDs (to match deg$gene)
+    ensembl2symbol <- setNames(as.character(symbol_map[ensembl_ids_bare]), ensembl_ids_versioned)
+    cat("  Gene symbol mapping:", sum(!is.na(ensembl2symbol)), "of", length(ensembl2symbol), "genes mapped\n")
 
     # --- Get covariates ---
     purity_vec <- get_purity_covariate(ds_dir, ds_cancer, colnames(mat))
@@ -471,6 +499,7 @@ for (i in seq_len(nrow(datasets))) {
     deg1 <- run_limma_group_comparison(mat, group1, purity_vec, sa_df)
 
     if (!is.null(deg1)) {
+        deg1 <- add_gene_symbol(deg1, ensembl2symbol)
         fwrite(deg1, file.path(ds_out, "DEG_TP53mt_vs_TP53wt.csv"))
 
         wb <- createWorkbook()
@@ -510,6 +539,7 @@ for (i in seq_len(nrow(datasets))) {
     deg2 <- run_limma_group_comparison(mat, group2, purity_vec, sa_df)
 
     if (!is.null(deg2)) {
+        deg2 <- add_gene_symbol(deg2, ensembl2symbol)
         fwrite(deg2, file.path(ds_out, "DEG_MUT_GOF_vs_MUT_LOF.csv"))
 
         wb <- createWorkbook()
@@ -550,6 +580,7 @@ for (i in seq_len(nrow(datasets))) {
     deg3 <- run_limma_group_comparison(mat, group3, purity_vec, sa_df)
 
     if (!is.null(deg3)) {
+        deg3 <- add_gene_symbol(deg3, ensembl2symbol)
         fwrite(deg3, file.path(ds_out, "DEG_Hotspot_vs_MUT_LOF.csv"))
 
         wb <- createWorkbook()
@@ -586,6 +617,7 @@ for (i in seq_len(nrow(datasets))) {
     deg4 <- run_limma_group_comparison(mat, group4, purity_vec, sa_df)
 
     if (!is.null(deg4)) {
+        deg4 <- add_gene_symbol(deg4, ensembl2symbol)
         fwrite(deg4, file.path(ds_out, "DEG_MUT_GOF_vs_TP53wt.csv"))
         wb <- createWorkbook()
         addWorksheet(wb, "GOF_vs_TP53wt")
@@ -619,6 +651,7 @@ for (i in seq_len(nrow(datasets))) {
     deg5 <- run_limma_group_comparison(mat, group5, purity_vec, sa_df)
 
     if (!is.null(deg5)) {
+        deg5 <- add_gene_symbol(deg5, ensembl2symbol)
         fwrite(deg5, file.path(ds_out, "DEG_MUT_LOF_vs_TP53wt.csv"))
         wb <- createWorkbook()
         addWorksheet(wb, "LOF_vs_TP53wt")
@@ -652,6 +685,7 @@ for (i in seq_len(nrow(datasets))) {
     deg6 <- run_limma_group_comparison(mat, group6, purity_vec, sa_df)
 
     if (!is.null(deg6)) {
+        deg6 <- add_gene_symbol(deg6, ensembl2symbol)
         fwrite(deg6, file.path(ds_out, "DEG_Hotspot_vs_TP53wt.csv"))
         wb <- createWorkbook()
         addWorksheet(wb, "Hotspot_vs_TP53wt")
@@ -686,6 +720,7 @@ for (i in seq_len(nrow(datasets))) {
     deg7 <- run_limma_group_comparison(mat, group7, purity_vec, sa_df)
 
     if (!is.null(deg7)) {
+        deg7 <- add_gene_symbol(deg7, ensembl2symbol)
         fwrite(deg7, file.path(ds_out, "DEG_DN_vs_TP53wt.csv"))
         wb <- createWorkbook()
         addWorksheet(wb, "DN_vs_TP53wt")
@@ -720,6 +755,7 @@ for (i in seq_len(nrow(datasets))) {
     deg8 <- run_limma_group_comparison(mat, group8, purity_vec, sa_df)
 
     if (!is.null(deg8)) {
+        deg8 <- add_gene_symbol(deg8, ensembl2symbol)
         fwrite(deg8, file.path(ds_out, "DEG_NonDN_vs_TP53wt.csv"))
         wb <- createWorkbook()
         addWorksheet(wb, "NonDN_vs_TP53wt")
@@ -755,6 +791,7 @@ for (i in seq_len(nrow(datasets))) {
     deg9 <- run_limma_group_comparison(mat, group9, purity_vec, sa_df)
 
     if (!is.null(deg9)) {
+        deg9 <- add_gene_symbol(deg9, ensembl2symbol)
         fwrite(deg9, file.path(ds_out, "DEG_DN_vs_NonDN.csv"))
         wb <- createWorkbook()
         addWorksheet(wb, "DN_vs_NonDN")

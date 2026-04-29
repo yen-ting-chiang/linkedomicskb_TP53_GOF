@@ -30,6 +30,8 @@ suppressPackageStartupMessages({
     library(limma)
     library(vroom)
     library(openxlsx)
+    library(AnnotationDbi)
+    library(org.Hs.eg.db)
 })
 
 set.seed(1234)
@@ -313,18 +315,50 @@ run_limma_group_comparison <- function(M, group_vec, purity_vec, sa_df) {
     tbl
 }
 
+#' Add gene_symbol_phosphosite column by mapping ENSEMBL IDs to HGNC gene symbols
+#'
+#' Parses phosphosite ID format: "ENSG...|ENSP...|SITE|SEQ|NUM"
+#' Extracts ENSEMBL gene ID (1st field) and phosphosite (3rd field)
+#' Produces "SYMBOL_SITE" format (e.g., "PDZD4_T150")
+#'
+#' @param deg_df Data frame with a "phosphosite" column
+#' @param mapping Named character vector (names = versioned ENSEMBL gene IDs, values = gene symbols)
+#' @return Data frame with gene_symbol_phosphosite column inserted before phosphosite column
+add_gene_symbol_phosphosite <- function(deg_df, mapping) {
+    # Parse phosphosite IDs: extract ENSEMBL gene ID and site
+    parts <- strsplit(deg_df$phosphosite, "\\|")
+    ensembl_gene <- vapply(parts, function(x) if (length(x) >= 1) x[1] else NA_character_, character(1))
+    site <- vapply(parts, function(x) if (length(x) >= 3) x[3] else NA_character_, character(1))
+
+    # Map ENSEMBL gene ID to gene symbol
+    symbol <- mapping[ensembl_gene]
+
+    # Build gene_symbol_phosphosite: SYMBOL_SITE
+    deg_df$gene_symbol_phosphosite <- ifelse(
+        !is.na(symbol) & !is.na(site),
+        paste0(symbol, "_", site),
+        ""
+    )
+
+    # Reorder: gene_symbol_phosphosite first, then phosphosite, then the rest
+    deg_df <- deg_df[, c("gene_symbol_phosphosite", "phosphosite",
+                         setdiff(names(deg_df), c("gene_symbol_phosphosite", "phosphosite")))]
+    deg_df
+}
+
 # ==============================================================================
 # Section 4: Helper to run one comparison and save results
 # ==============================================================================
 
 run_and_save_comparison <- function(comparison_name, file_prefix, sheet_name,
                                     group_vec, mat, purity_vec, sa_df,
-                                    ds_out, ds_summary) {
+                                    ds_out, ds_summary, ensembl2symbol) {
     cat("\n  ---", comparison_name, "---\n")
     deg <- run_limma_group_comparison(mat, group_vec, purity_vec, sa_df)
     prefix_clean <- gsub("[^A-Za-z0-9_]", "_", file_prefix)
 
     if (!is.null(deg)) {
+        deg <- add_gene_symbol_phosphosite(deg, ensembl2symbol)
         fwrite(deg, file.path(ds_out, paste0("DPS_", prefix_clean, ".csv")))
         wb <- createWorkbook()
         addWorksheet(wb, sheet_name)
@@ -377,6 +411,19 @@ for (i in seq_len(nrow(datasets))) {
     mat <- impute_and_filter_phospho(mat0, min_frac = min_frac_complete)
     cat("  After filtering:", nrow(mat), "phosphosites x", ncol(mat), "samples\n")
 
+    # --- Build ENSEMBL-to-gene-symbol lookup for this dataset ---
+    ensembl_ids_versioned <- unique(sub("\\|.*$", "", rownames(mat)))
+    ensembl_ids_bare <- sub("\\.\\d+$", "", ensembl_ids_versioned)
+    symbol_map <- tryCatch(
+        AnnotationDbi::mapIds(org.Hs.eg.db, keys = ensembl_ids_bare,
+                              column = "SYMBOL", keytype = "ENSEMBL",
+                              multiVals = "first"),
+        error = function(e) { cat("  [WARN] Gene symbol mapping failed:", e$message, "\n"); setNames(rep(NA_character_, length(ensembl_ids_bare)), ensembl_ids_bare) }
+    )
+    # Create mapping keyed by versioned ENSEMBL gene IDs
+    ensembl2symbol <- setNames(as.character(symbol_map[ensembl_ids_bare]), ensembl_ids_versioned)
+    cat("  Gene symbol mapping:", sum(!is.na(ensembl2symbol)), "of", length(ensembl2symbol), "genes mapped\n")
+
     # --- Get covariates ---
     purity_vec <- get_purity_covariate(ds_folder, ds_dir, colnames(mat))
     sa_df <- get_sex_age_covariates(ds_folder, ds_dir, colnames(mat))
@@ -404,55 +451,55 @@ for (i in seq_len(nrow(datasets))) {
     g1 <- factor(g1[!is.na(g1)], levels = c("TP53wt", "TP53mt"))
     cat("    TP53wt:", sum(g1 == "TP53wt"), " TP53mt:", sum(g1 == "TP53mt"), "\n")
     ds_summary <- run_and_save_comparison("Comparison 1: TP53mt vs TP53wt", "TP53mt_vs_TP53wt", "mt_vs_wt",
-        g1, mat, purity_vec, sa_df, ds_out, ds_summary)
+        g1, mat, purity_vec, sa_df, ds_out, ds_summary, ensembl2symbol)
 
     # 2. MUT_GOF vs MUT_LOF
     g2 <- setNames(c(rep("MUT_GOF", length(gof_samples)), rep("MUT_LOF", length(lof_samples))), c(gof_samples, lof_samples))
     g2 <- factor(g2, levels = c("MUT_LOF", "MUT_GOF"))
     ds_summary <- run_and_save_comparison("Comparison 2: GOF vs LOF", "MUT_GOF_vs_MUT_LOF", "GOF_vs_LOF",
-        g2, mat, purity_vec, sa_df, ds_out, ds_summary)
+        g2, mat, purity_vec, sa_df, ds_out, ds_summary, ensembl2symbol)
 
     # 3. Hotspot vs MUT_LOF
     g3 <- setNames(c(rep("Hotspot", length(hotspot_samples)), rep("MUT_LOF", length(lof_samples))), c(hotspot_samples, lof_samples))
     g3 <- g3[!duplicated(names(g3))]; g3 <- factor(g3, levels = c("MUT_LOF", "Hotspot"))
     ds_summary <- run_and_save_comparison("Comparison 3: Hotspot vs LOF", "Hotspot_vs_MUT_LOF", "Hot_vs_LOF",
-        g3, mat, purity_vec, sa_df, ds_out, ds_summary)
+        g3, mat, purity_vec, sa_df, ds_out, ds_summary, ensembl2symbol)
 
     # 4. MUT_GOF vs TP53wt
     g4 <- setNames(c(rep("MUT_GOF", length(gof_samples)), rep("TP53wt", length(wt_samples))), c(gof_samples, wt_samples))
     g4 <- factor(g4, levels = c("TP53wt", "MUT_GOF"))
     ds_summary <- run_and_save_comparison("Comparison 4: GOF vs TP53wt", "MUT_GOF_vs_TP53wt", "GOF_vs_wt",
-        g4, mat, purity_vec, sa_df, ds_out, ds_summary)
+        g4, mat, purity_vec, sa_df, ds_out, ds_summary, ensembl2symbol)
 
     # 5. MUT_LOF vs TP53wt
     g5 <- setNames(c(rep("MUT_LOF", length(lof_samples)), rep("TP53wt", length(wt_samples))), c(lof_samples, wt_samples))
     g5 <- factor(g5, levels = c("TP53wt", "MUT_LOF"))
     ds_summary <- run_and_save_comparison("Comparison 5: LOF vs TP53wt", "MUT_LOF_vs_TP53wt", "LOF_vs_wt",
-        g5, mat, purity_vec, sa_df, ds_out, ds_summary)
+        g5, mat, purity_vec, sa_df, ds_out, ds_summary, ensembl2symbol)
 
     # 6. Hotspot vs TP53wt
     g6 <- setNames(c(rep("Hotspot", length(hotspot_samples)), rep("TP53wt", length(wt_samples))), c(hotspot_samples, wt_samples))
     g6 <- factor(g6, levels = c("TP53wt", "Hotspot"))
     ds_summary <- run_and_save_comparison("Comparison 6: Hotspot vs TP53wt", "Hotspot_vs_TP53wt", "Hot_vs_wt",
-        g6, mat, purity_vec, sa_df, ds_out, ds_summary)
+        g6, mat, purity_vec, sa_df, ds_out, ds_summary, ensembl2symbol)
 
     # 7. DN vs TP53wt
     g7 <- setNames(c(rep("DN", length(dn_samples)), rep("TP53wt", length(wt_samples))), c(dn_samples, wt_samples))
     g7 <- factor(g7, levels = c("TP53wt", "DN"))
     ds_summary <- run_and_save_comparison("Comparison 7: DN vs TP53wt", "DN_vs_TP53wt", "DN_vs_wt",
-        g7, mat, purity_vec, sa_df, ds_out, ds_summary)
+        g7, mat, purity_vec, sa_df, ds_out, ds_summary, ensembl2symbol)
 
     # 8. Non-DN vs TP53wt
     g8 <- setNames(c(rep("NonDN", length(nondn_samples)), rep("TP53wt", length(wt_samples))), c(nondn_samples, wt_samples))
     g8 <- factor(g8, levels = c("TP53wt", "NonDN"))
     ds_summary <- run_and_save_comparison("Comparison 8: NonDN vs TP53wt", "NonDN_vs_TP53wt", "NonDN_vs_wt",
-        g8, mat, purity_vec, sa_df, ds_out, ds_summary)
+        g8, mat, purity_vec, sa_df, ds_out, ds_summary, ensembl2symbol)
 
     # 9. DN vs non-DN
     g9 <- setNames(c(rep("DN", length(dn_samples)), rep("NonDN", length(nondn_samples))), c(dn_samples, nondn_samples))
     g9 <- g9[!duplicated(names(g9))]; g9 <- factor(g9, levels = c("NonDN", "DN"))
     ds_summary <- run_and_save_comparison("Comparison 9: DN vs NonDN", "DN_vs_NonDN", "DN_vs_NonDN",
-        g9, mat, purity_vec, sa_df, ds_out, ds_summary)
+        g9, mat, purity_vec, sa_df, ds_out, ds_summary, ensembl2symbol)
 
     all_deg_summary[[ds_folder]] <- as.data.frame(ds_summary, stringsAsFactors = FALSE)
     cat("\n")
