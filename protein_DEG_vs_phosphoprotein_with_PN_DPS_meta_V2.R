@@ -1,9 +1,9 @@
 ################################################################################
-# Protein DEG vs Phosphoprotein (without Protein Normalization) DPS
+# Protein DEG vs Phosphoprotein (with Protein Normalization) DPS
 # Meta-Analysis Integration
 #
 # Purpose:
-#   Integrate protein-level and phosphoprotein-level (without protein
+#   Integrate protein-level and phosphoprotein-level (with protein
 #   normalization) cross-cancer meta-analysis results by merging matching
 #   comparison files. The merge key is:
 #     - Protein data: "gene" column (Ensembl gene ID, e.g., ENSG00000131747.15)
@@ -23,12 +23,12 @@
 # Input:
 #   - protein_differential_analysis_subgroup_adjusted/protein_DEG_meta_analysis/
 #       META_DEG_{comparison}.csv  (9 comparisons)
-#   - phosphoprotein_differential_analysis_without_protein_normalization_subgroup_adjusted/
-#       phosphoprotein_DPS_without_protein_normalization_meta_analysis/
+#   - phosphoprotein_differential_analysis_subgroup_adjusted/
+#       phosphoprotein_DPS_meta_analysis/
 #       META_DPS_{comparison}.csv  (9 comparisons)
 #
 # Output:
-#   - protein_DEG_vs_phosphoprotein_without_PN_DPS_meta/
+#   - protein_DEG_vs_phosphoprotein_with_PN_DPS_meta/
 #       META_integrated_{comparison}.csv and .xlsx  (9 comparisons)
 #       integration_summary.csv and .xlsx
 #
@@ -69,11 +69,11 @@ base_path <- "C:/Users/danny/Documents/R_project/linkedomicskb_TP53_GOF"
 protein_meta_dir <- file.path(base_path,
     "protein_differential_analysis_subgroup_adjusted", "protein_DEG_meta_analysis")
 phospho_meta_dir <- file.path(base_path,
-    "phosphoprotein_differential_analysis_without_protein_normalization_subgroup_adjusted",
-    "phosphoprotein_DPS_without_protein_normalization_meta_analysis")
+    "phosphoprotein_differential_analysis_subgroup_adjusted",
+    "phosphoprotein_DPS_meta_analysis")
 
 # Output directory
-output_dir <- file.path(base_path, "protein_DEG_vs_phosphoprotein_without_PN_DPS_meta")
+output_dir <- file.path(base_path, "protein_DEG_vs_phosphoprotein_with_PN_DPS_meta")
 dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
 
 # 9 comparisons (must match the naming convention of META_DEG / META_DPS files)
@@ -88,7 +88,7 @@ comparisons <- data.frame(
 )
 
 cat("====================================================================\n")
-cat("Protein DEG vs Phosphoprotein (w/o PN) DPS Meta-Analysis Integration\n")
+cat("Protein DEG vs Phosphoprotein (with PN) DPS Meta-Analysis Integration\n")
 cat("====================================================================\n\n")
 
 # ==============================================================================
@@ -324,7 +324,7 @@ saveWorkbook(wb_sum, file.path(output_dir, "integration_summary.xlsx"),
              overwrite = TRUE)
 
 # Print summary
-cat("\n=== Protein DEG vs Phospho DPS (w/o PN) Meta Integration Summary ===\n\n")
+cat("\n=== Protein DEG vs Phospho DPS (with PN) Meta Integration Summary ===\n\n")
 print(as.data.frame(summary_df), row.names = FALSE)
 
 cat("\n====================================================================\n")
@@ -421,7 +421,7 @@ for (j in seq_len(nrow(comparisons))) {
 
     # Define fill color palette
     fill_values <- c(
-        "orange"      = "#FF7F0E",
+        "orange"      = "#FFC125",
         "teal"        = "#009688",
         "light_grey"  = "#D9D9D9",
         "medium_grey" = "#A0A0A0"
