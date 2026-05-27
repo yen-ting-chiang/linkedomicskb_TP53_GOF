@@ -6,6 +6,9 @@ library(openxlsx)
 library(VennDiagram)
 library(grid)
 library(futile.logger)
+library(clusterProfiler)
+library(msigdbr)
+library(ggplot2)
 
 # Suppress VennDiagram logger output to prevent cluttering the console
 flog.threshold(ERROR, name = "VennDiagramLogger")
@@ -28,6 +31,108 @@ meta_data <- read.csv(data_file, stringsAsFactors = FALSE)
 
 # Filter out rows without gene_symbol
 meta_data <- meta_data %>% filter(!is.na(gene_symbol) & gene_symbol != "")
+
+# Load MSigDB Hallmark gene sets for ORA
+msig_h <- msigdbr(species = "Homo sapiens", category = "H") %>% 
+  dplyr::select(gs_name, gene_symbol)
+
+# Function to perform ORA and plot results
+perform_ora_and_plot <- function(gene_list, region_name, out_dir) {
+  gene_list <- gene_list[!is.na(gene_list) & gene_list != ""]
+  if (length(gene_list) == 0) return(NULL)
+  
+  # Perform ORA using clusterProfiler
+  # Set cutoffs to 1 to ensure we can pad up to 5 even if non-significant
+  ora_res <- enricher(gene = gene_list, TERM2GENE = msig_h, pvalueCutoff = 1, qvalueCutoff = 1)
+  
+  if (!is.null(ora_res) && nrow(as.data.frame(ora_res)) > 0) {
+    res_df <- as.data.frame(ora_res)
+    
+    # Calculate numeric GeneRatio for plotting
+    res_df$GeneRatioNum <- sapply(res_df$GeneRatio, function(x) {
+      parts <- as.numeric(strsplit(x, "/")[[1]])
+      if (length(parts) == 2 && parts[2] != 0) parts[1] / parts[2] else 0
+    })
+    
+    # Sort by p.adjust
+    res_df <- res_df[order(res_df$p.adjust), ]
+    
+    # Identify significant rows (padj < 0.05)
+    sig_df <- res_df[res_df$p.adjust < 0.05, ]
+    
+    # If significant pathways < 5, pad to 5. Otherwise keep up to 15.
+    if (nrow(sig_df) < 5) {
+      plot_df <- head(res_df, 5)
+    } else {
+      plot_df <- head(sig_df, 15)
+    }
+    
+    if (nrow(plot_df) > 0) {
+      # Save tables
+      write_df <- res_df[res_df$p.adjust < 0.05, ]
+      if (nrow(write_df) < 5) write_df <- head(res_df, 5)
+      
+      write.csv(write_df, file.path(out_dir, paste0("ORA_Hallmark_", region_name, ".csv")), row.names = FALSE)
+      write.xlsx(write_df, file.path(out_dir, paste0("ORA_Hallmark_", region_name, ".xlsx")), row.names = FALSE)
+      
+      # Clean Pathway names: remove "HALLMARK_" or "Hallmark "
+      plot_df$Description <- gsub("(?i)^hallmark[_ ]", "", plot_df$Description)
+      
+      # Order Description factor by p.adjust (descending so smallest padj is at the top)
+      plot_df$Description <- factor(plot_df$Description, levels = rev(plot_df$Description))
+      
+      # Control plot title visibility (TRUE to show, FALSE to hide)
+      show_plot_title <- TRUE
+      plot_title_text <- if(show_plot_title) paste("Hallmark ORA:", region_name) else NULL
+      
+      # Bubble plot (custom ggplot)
+      p <- ggplot(plot_df, aes(x = GeneRatioNum, y = Description)) +
+        geom_point(aes(size = Count, color = p.adjust)) +
+        # scale_color_gradient controls the p.adjust color legend, use breaks to specify tick marks
+        #scale_color_viridis_c(option = "viridis", direction = -1, name = "p.adjust")+
+        scale_color_gradient(low = "#E64B35", high = "#4DBBD5", name = "p.adjust")+
+        labs(title = plot_title_text, x = "GeneRatio", y = "") +
+        # Expand axis limits to prevent bubbles at edges from being cut off or overlapping the legend
+        scale_x_continuous(expand = expansion(mult = 0.15)) +
+        scale_y_discrete(expand = expansion(mult = 0.1)) +
+        theme_bw() +
+        theme(
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.border = element_blank(),
+          panel.background = element_rect(fill = "white", color = NA),
+          plot.background = element_rect(fill = "white", color = NA),
+          axis.line = element_line(color = "black"),
+          axis.text.y = element_text(size = 7, face = "bold", color = "black"),
+          axis.text.x = element_text(size = 7, face = "bold", color = "black"),
+          axis.title = element_text(size = 7, face = "bold", color = "black"),
+          plot.title = element_text(size = 7, face = "bold", hjust = 0.5, color = "black"),
+          # legend size and position
+          legend.position = "right",                                             # Ensure legend is placed outside on the right
+          legend.box.margin = margin(0, 0, 0, 10),                               # Add space between main plot and legend to prevent overlapping
+          legend.title = element_text(size = 7, face = "bold", color = "black"), # Legend title size
+          legend.text = element_text(size = 7, color = "black"),                 # Legend text size
+          legend.key.size = unit(0.3, "cm")                                      # Legend key icon size
+        )
+      
+      if(!show_plot_title) {
+        p <- p + theme(plot.title = element_blank())
+      }
+      
+      pdf(file.path(out_dir, paste0("ORA_Hallmark_", region_name, "_bubble.pdf")), width = 3.8, height = 2.5)
+      print(p)
+      dev.off()
+      
+      tiff(file.path(out_dir, paste0("ORA_Hallmark_", region_name, "_bubble.tiff")), width = 3.8, height = 2.5, units = "in", res = 300, compression = "lzw")
+      print(p)
+      dev.off()
+      
+      cat("ORA results and bubble plots generated for", region_name, "\n")
+    }
+  } else {
+    cat("No significant ORA results for", region_name, "\n")
+  }
+}
 
 # ==============================================================================
 # 1. Process UP-regulated genes
@@ -82,32 +187,39 @@ venn.plot.up <- venn.diagram(
   col = color_up,
   fill = color_up,
   alpha = 0.6,
-  cat.cex = 1.5,
+  cat.cex = 0.4,
   cat.fontface = "bold",
   cat.default.pos = "outer",
-  cat.pos = c(-20, 20),
-  cat.dist = c(0.05, 0.05),
-  cex = 1.5,
+  cat.pos = c(-45, 45),
+  cat.dist = c(0.15, 0.15),
+  cex = 0.4,
   fontfamily = "sans",
   cat.fontfamily = "sans",
   scaled = FALSE, # Ensure both circles are the same size
   main = "Up-regulated Genes\n(mRNA vs Protein)",
-  main.cex = 1.5,
+  main.cex = 0.4,
   main.fontface = "bold",
   margin = 0.1
 )
 
 # Save UP Venn to PDF
-pdf(file.path(output_dir, "Venn_UP.pdf"), width = 6, height = 6)
+pdf(file.path(output_dir, "Venn_UP.pdf"), width = 1.5, height = 1.5)
 grid.newpage()
 grid.draw(venn.plot.up)
 dev.off()
 
 # Save UP Venn to TIFF
-tiff(file.path(output_dir, "Venn_UP.tiff"), width = 6, height = 6, units = "in", res = 300, compression = "lzw")
+tiff(file.path(output_dir, "Venn_UP.tiff"), width = 1.5, height = 1.5, units = "in", res = 300, compression = "lzw")
 grid.newpage()
 grid.draw(venn.plot.up)
 dev.off()
+
+# ==============================================================================
+# 1.5. ORA for UP-regulated regions
+# ==============================================================================
+perform_ora_and_plot(up_regions$Only_mRNA, "UP_Only_mRNA", output_dir)
+perform_ora_and_plot(up_regions$Intersection, "UP_Intersection", output_dir)
+perform_ora_and_plot(up_regions$Only_protein, "UP_Only_protein", output_dir)
 
 # ==============================================================================
 # 2. Process DOWN-regulated genes
@@ -140,31 +252,39 @@ venn.plot.down <- venn.diagram(
   col = color_down,
   fill = color_down,
   alpha = 0.6,
-  cat.cex = 1.5,
+  cat.cex = 0.4,
   cat.fontface = "bold",
   cat.default.pos = "outer",
-  cat.pos = c(-20, 20),
-  cat.dist = c(0.05, 0.05),
-  cex = 1.5,
+  cat.pos = c(-45, 45),
+  cat.dist = c(0.15, 0.15),
+  cex = 0.4,
   fontfamily = "sans",
   cat.fontfamily = "sans",
   scaled = FALSE, # Ensure both circles are the same size
   main = "Down-regulated Genes\n(mRNA vs Protein)",
-  main.cex = 1.5,
+  main.cex = 0.4,
   main.fontface = "bold",
   margin = 0.1
 )
 
 # Save DOWN Venn to PDF
-pdf(file.path(output_dir, "Venn_DOWN.pdf"), width = 6, height = 6)
+pdf(file.path(output_dir, "Venn_DOWN.pdf"), width = 1.5, height = 1.5)
 grid.newpage()
 grid.draw(venn.plot.down)
 dev.off()
 
 # Save DOWN Venn to TIFF
-tiff(file.path(output_dir, "Venn_DOWN.tiff"), width = 6, height = 6, units = "in", res = 300, compression = "lzw")
+tiff(file.path(output_dir, "Venn_DOWN.tiff"), width = 1.5, height = 1.5, units = "in", res = 300, compression = "lzw")
 grid.newpage()
 grid.draw(venn.plot.down)
 dev.off()
 
-print("Venn diagrams and region lists have been successfully generated.")
+# ==============================================================================
+# 2.5. ORA for DOWN-regulated regions
+# ==============================================================================
+perform_ora_and_plot(down_regions$Only_mRNA, "DOWN_Only_mRNA", output_dir)
+perform_ora_and_plot(down_regions$Intersection, "DOWN_Intersection", output_dir)
+perform_ora_and_plot(down_regions$Only_protein, "DOWN_Only_protein", output_dir)
+
+print("Venn diagrams, region lists, and ORA analysis have been successfully generated.")
+
