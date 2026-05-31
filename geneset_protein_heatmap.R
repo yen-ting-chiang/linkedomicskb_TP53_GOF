@@ -50,8 +50,9 @@ all_datasets <- c("BRCA", "CCRCC", "COAD", "GBM", "HNSCC", "LSCC", "LUAD", "OV",
 # To use all available datasets, keep it as: all_datasets
 
 #selected_datasets <- all_datasets
-selected_datasets <- c("BRCA", "COAD", "HNSCC", "LUAD", "PDAC", "UCEC") 
+#selected_datasets <- c("BRCA", "COAD", "HNSCC", "LUAD", "PDAC", "UCEC") 
 #selected_datasets <- c("BRCA", "GBM", "OV", "UCEC")
+selected_datasets <- c("GBM", "HNSCC", "LSCC", "LUAD", "OV", "UCEC")
 
 # 9 comparisons
 comparisons <- data.frame(
@@ -67,8 +68,8 @@ comparisons <- data.frame(
 # USER: Specify which comparisons to generate heatmaps for.
 # Uncomment the ones you want to include in the list below.
 selected_comparisons <- c(
-    "TP53mt_vs_TP53wt"#,
-    #"MUT_GOF_vs_MUT_LOF",
+    #"TP53mt_vs_TP53wt",
+    "MUT_GOF_vs_MUT_LOF"#,
     #"Hotspot_vs_MUT_LOF",
     #"MUT_GOF_vs_TP53wt",
     #"MUT_LOF_vs_TP53wt",
@@ -159,7 +160,7 @@ user_gap_degree <- 40
 
 gene_sets_to_plot <- list(
     list(category = "C2", subcategory = "CP:KEGG_LEGACY",
-         gene_set = "KEGG_OXIDATIVE_PHOSPHORYLATION")
+         gene_set = "KEGG_COMPLEMENT_AND_COAGULATION_CASCADES")
 )
 
 # ==============================================================================
@@ -311,20 +312,28 @@ draw_polar_heatmap <- function(logfc_mat, sig_mat, col_fun, na_col = "grey90",
                else if (n_genes > 60) 0.45
                else 0.55
 
-    # Track height per dataset (relative to radius)
-    track_h <- if (track_w == "auto") {
-        max(0.02, min(0.15, 0.6 / n_datasets))
+    # --- Dynamic height budget (total must stay under 1.0) ---
+    # Reserve space for track margins: each track gets 0.01 (top + bottom)
+    # Total tracks = 1 (labels) + n_datasets (heatmap) + 1 (dendro) = n_datasets + 2
+    n_tracks     <- n_datasets + 2
+    margin_total <- n_tracks * 0.01
+    budget       <- 0.92 - margin_total   # usable radius after margins
+
+    # Gene label track height (needs space for rotated text)
+    label_track_h <- if (n_genes > 100) 0.12
+                     else if (n_genes > 60) 0.15
+                     else 0.20
+
+    # Dendrogram track height
+    dendro_track_h <- 0.10
+
+    # Remaining budget for dataset tracks
+    ds_budget <- budget - label_track_h - dendro_track_h
+    track_h   <- if (track_w == "auto") {
+        max(0.02, ds_budget / n_datasets)
     } else {
         as.numeric(track_w)
     }
-
-    # Gene label track height (needs space for rotated text)
-    label_track_h <- if (n_genes > 100) 0.15
-                     else if (n_genes > 60) 0.18
-                     else 0.25
-
-    # Dendrogram track height
-    dendro_track_h <- 0.15
 
     # --- Initialize circos ---
     circos.clear()
