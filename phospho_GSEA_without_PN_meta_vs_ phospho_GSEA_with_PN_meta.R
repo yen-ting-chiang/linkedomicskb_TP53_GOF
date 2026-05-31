@@ -13,7 +13,7 @@
 #     (from phosphoprotein_with_PN_GSEA_subgroup_adjusted_meta_analysis.R)
 #
 # Output:
-#   - phospho_GSEA_without_PN_meta_vs_ phospho_GSEA_with_PN_meta/
+#   - phospho_GSEA_without_PN_meta_vs_phospho_GSEA_with_PN_meta/
 #       {collection}/META_GSEA_{comparison}.csv and .xlsx
 #       integration_summary.csv and .xlsx
 ################################################################################
@@ -36,7 +36,7 @@ without_PN_meta_dir <- file.path(base_path, "phosphoprotein_GSEA_without_PN_meta
 with_PN_meta_dir    <- file.path(base_path, "phosphoprotein_GSEA_with_PN_meta")
 
 # Output directory
-output_dir <- file.path(base_path, "phospho_GSEA_without_PN_meta_vs_ phospho_GSEA_with_PN_meta")
+output_dir <- file.path(base_path, "phospho_GSEA_without_PN_meta_vs_phospho_GSEA_with_PN_meta")
 dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
 
 # 9 comparisons

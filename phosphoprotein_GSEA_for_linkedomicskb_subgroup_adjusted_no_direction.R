@@ -1,10 +1,10 @@
 ################################################################################
-# TP53 Phosphoprotein-Level PTM-SEA (LinkedOmicsKB Version)
+# TP53 Phosphoprotein-Level Preranked GSEA (LinkedOmicsKB Version)
 #
-# Uses moderated-t statistics from phosphoprotein_differential_analysis_without_protein_normalization_subgroup_adjusted/ as ranking
+# Uses moderated-t statistics from phosphoprotein_differential_analysis_subgroup_adjusted/ as ranking
 #
 # Gene Set Collection:
-#   - PTMsigDB v2.0.0 (phosphosite level, bi-directional signatures)
+#   - PTMsigDB (phosphosite level)
 #     data_PTMsigDB_all_sites_v2.0.0.xlsx
 #
 # ID Mapping Strategy:
@@ -23,17 +23,6 @@
 #   between Ensembl-based phosphosite IDs and HGNC gene symbol-based PTMsigDB
 #   identifiers.
 #
-# Bi-directional Scoring (PTM-SEA):
-#   PTMsigDB perturbation signatures contain BOTH up- and down-regulated
-#   phosphosites (indicated by site.direction = 'u' or 'd'). To properly
-#   score concordance, we implement bi-directional enrichment:
-#     - For 'u'-tagged sites: original moderated-t is used as ranking metric
-#     - For 'd'-tagged sites: sign-flipped moderated-t (-t) is used
-#   This ensures that when data matches the expected perturbation pattern
-#   (u-sites up AND d-sites down), the NES is strongly positive.
-#   Reference: Krug et al., Mol Cell Proteomics, 2019
-#              (DOI: 10.1074/mcp.TIR118.000943)
-#
 # 10 Datasets: BRCA, CCRCC, COAD, GBM, HNSCC, LSCC, LUAD, OV, PDAC, UCEC
 #
 # 9 Comparisons per dataset:
@@ -41,7 +30,7 @@
 #   MUT_GOF vs TP53wt, MUT_LOF vs TP53wt, Hotspots vs TP53wt,
 #   DN vs TP53wt, Non-DN vs TP53wt, DN vs non-DN
 #
-# Methodology: PTM-SEA bi-directional scoring via fgsea with PTMsigDB
+# Methodology: fgsea preranked GSEA with PTMsigDB
 ################################################################################
 
 # ==============================================================================
@@ -68,11 +57,11 @@ datasets <- data.frame(
     stringsAsFactors = FALSE
 )
 
-# Input: phosphoprotein DPS results (without protein normalization)
-dps_dir <- file.path(base_path, "phosphoprotein_differential_analysis_without_protein_normalization_subgroup_adjusted")
+# Input: phosphoprotein DPS results
+dps_dir <- file.path(base_path, "phosphoprotein_differential_analysis_subgroup_adjusted")
 
-# Output: GSEA results (without protein normalization)
-output_dir <- file.path(base_path, "phosphoprotein_GSEA_without_protein_normalization_subgroup_adjusted")
+# Output: GSEA results
+output_dir <- file.path(base_path, "phosphoprotein_GSEA_subgroup_adjusted")
 dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
 
 # 9 comparisons with their file prefixes
@@ -91,38 +80,29 @@ minSize <- 5
 maxSize <- 500
 
 cat("====================================================================\n")
-cat("TP53 Phosphoprotein-Level PTM-SEA (LinkedOmicsKB - without protein normalization)\n")
+cat("TP53 Phosphoprotein-Level Preranked GSEA (LinkedOmicsKB)\n")
 cat("====================================================================\n\n")
 
 # ==============================================================================
-# Section 2: Load Gene Sets from PTMsigDB (Bi-directional)
+# Section 2: Load Gene Sets from PTMsigDB
 # ==============================================================================
 
-cat("Loading PTMsigDB gene sets (with direction information)...\n")
+cat("Loading PTMsigDB gene sets...\n")
 
-#' Read PTMsigDB and build bi-directional pathway lists
-#'
-#' Each PTMsigDB perturbation signature contains phosphosites tagged with
-#' direction ('u' = up-regulated, 'd' = down-regulated after perturbation).
-#' To enable bi-directional scoring with fgsea, this function creates
-#' direction-aware gene_site IDs:
-#'   - 'u'-tagged sites: stored as "GENE_SITE" (no suffix)
-#'   - 'd'-tagged sites: stored as "GENE_SITE;d"
-#'
-#' At runtime, the stats vector is augmented with sign-flipped entries
-#' ("GENE_SITE;d" -> -t), so fgsea correctly scores concordance.
+#' Read PTMsigDB and build pathway lists keyed by GENE_SITE identifier
+#' Also build a flanking-sequence-to-gene_site lookup table for ID mapping
 #'
 #' @param fp Path to PTMsigDB xlsx file
 #' @return A list with two elements:
-#'   - pathways: named list of character vectors (signature -> direction-aware IDs)
-#'   - flank_lookup: named character vector (flanking_seq -> base gene_site)
+#'   - pathways: named list of character vectors (signature -> gene_site IDs)
+#'   - flank_lookup: named character vector (flanking_seq -> gene_site)
 read_ptmsigdb <- function(fp) {
     if (!file.exists(fp)) {
         stop("[PTMsigDB] File does not exist: ", fp)
     }
 
     df <- readxl::read_xlsx(fp)
-    req <- c("signature", "site.annotation", "site.flanking", "site.direction")
+    req <- c("signature", "site.annotation", "site.flanking")
     if (!all(req %in% names(df))) {
         stop("[PTMsigDB] xlsx is missing necessary fields: ",
              paste(setdiff(req, names(df)), collapse = ", "))
@@ -134,40 +114,16 @@ read_ptmsigdb <- function(fp) {
     # Extract flanking sequence (15-mer)
     flanking <- toupper(trimws(df$site.flanking))
 
-    # Extract site direction (u = up-regulated, d = down-regulated in perturbation)
-    direction <- tolower(trimws(df$site.direction))
-
-    # Build direction-aware gene_site IDs for bi-directional scoring:
-    #   'u'-tagged sites -> "GENE_SITE"   (original t-stat will be used by fgsea)
-    #   'd'-tagged sites -> "GENE_SITE;d" (sign-flipped t-stat will be used)
-    dir_gene_site <- ifelse(direction == "d",
-                            paste0(gene_site, ";d"),
-                            gene_site)
-
-    # Build pathway lists with direction-aware IDs
-    by_sig <- split(dir_gene_site, df$signature)
+    # Build pathway lists keyed by gene_site
+    by_sig <- split(gene_site, df$signature)
     pathways <- lapply(by_sig, function(v) unique(v[nzchar(v)]))
     pathways[lengths(pathways) == 0] <- NULL
 
-    # Build flanking-to-gene_site lookup (maps to BASE gene_site without direction)
-    # Direction is signature-specific, so the flanking lookup stores only base IDs
+    # Build flanking-to-gene_site lookup
+    # Use unique flanking sequences; for duplicates, keep first occurrence
     valid <- nzchar(flanking) & nzchar(gene_site) & nchar(flanking) == 15
     flank_lookup <- setNames(gene_site[valid], flanking[valid])
     flank_lookup <- flank_lookup[!duplicated(names(flank_lookup))]
-
-    # Report direction statistics
-    n_up <- sum(direction == "u", na.rm = TRUE)
-    n_dn <- sum(direction == "d", na.rm = TRUE)
-    sigs_with_u <- unique(df$signature[direction == "u"])
-    sigs_with_d <- unique(df$signature[direction == "d"])
-    n_bidir <- length(intersect(sigs_with_u, sigs_with_d))
-
-    cat("  [PTMsigDB] Direction breakdown:\n")
-    cat("    Total rows:", nrow(df), "\n")
-    cat("    Up-tagged sites (u):", n_up, "\n")
-    cat("    Down-tagged sites (d):", n_dn, "\n")
-    cat("    Bi-directional signatures (contain both u and d):",
-        n_bidir, "of", length(pathways), "\n")
 
     list(pathways = pathways, flank_lookup = flank_lookup)
 }
@@ -177,7 +133,7 @@ ptmsigdb_data <- read_ptmsigdb(ptmsigdb_file)
 pathways_ptm <- ptmsigdb_data$pathways
 flank_lookup <- ptmsigdb_data$flank_lookup
 
-cat("  PTMsigDB:", length(pathways_ptm), "phosphosite sets (bi-directional)\n")
+cat("  PTMsigDB:", length(pathways_ptm), "phosphosite sets\n")
 cat("  Flanking lookup table:", length(flank_lookup), "unique 15-mer entries\n\n")
 
 # Named list for iteration
@@ -186,7 +142,7 @@ collections <- list(
 )
 
 # ==============================================================================
-# Section 3: Run PTM-SEA Bi-directional Scoring
+# Section 3: Run Preranked GSEA
 # ==============================================================================
 
 #' Map DPS phosphosite IDs to PTMsigDB gene_site IDs via flanking sequence
@@ -219,23 +175,12 @@ map_dps_to_ptmsigdb <- function(dps_ids, lookup) {
     mapped
 }
 
-#' Run PTM-SEA bi-directional scoring from a DPS table
-#'
-#' Creates an augmented stats vector with sign-flipped entries for 'd'-tagged
-#' sites, enabling bi-directional concordance scoring:
-#'   - "GENE_SITE"   -> original t-statistic (for 'u'-tagged pathway members)
-#'   - "GENE_SITE;d" -> -t (sign-flipped, for 'd'-tagged pathway members)
-#'
-#' Interpretation of results:
-#'   - Positive NES: data is CONCORDANT with the perturbation signature
-#'     (u-sites tend to be up AND d-sites tend to be down in data)
-#'   - Negative NES: data is DISCORDANT with the perturbation signature
-#'
+#' Run fgsea preranked GSEA from a DPS table
 #' @param dps_file Path to DPS CSV file
-#' @param pathways Named list of direction-aware phosphosite sets
-#' @param lookup Flanking-to-gene_site lookup table (base IDs)
+#' @param pathways Named list of phosphosite sets (gene_site IDs)
+#' @param lookup Flanking-to-gene_site lookup table
 #' @return fgsea result data.frame or NULL
-run_ptmsea <- function(dps_file, pathways, lookup) {
+run_preranked_gsea <- function(dps_file, pathways, lookup) {
     if (!file.exists(dps_file)) return(NULL)
 
     dps <- fread(dps_file)
@@ -257,7 +202,7 @@ run_ptmsea <- function(dps_file, pathways, lookup) {
     mapped_ids <- gene_site_ids[mapped_mask]
     mapped_t <- dps$t[mapped_mask]
 
-    # Build named vector of moderated-t statistics (base gene_site IDs)
+    # Build named vector of moderated-t statistics
     stats_vec <- setNames(mapped_t, mapped_ids)
 
     # Remove duplicates (keep first = most significant from topTable)
@@ -271,30 +216,14 @@ run_ptmsea <- function(dps_file, pathways, lookup) {
         return(NULL)
     }
 
-    # ---- PTM-SEA bi-directional augmentation ----
-    # Create sign-flipped entries for bi-directional scoring:
-    #   Original:  "GENE_SITE"   -> t   (used by 'u'-tagged pathway members)
-    #   Flipped:   "GENE_SITE;d" -> -t  (used by 'd'-tagged pathway members)
-    #
-    # Logic: when a 'd'-tagged site has negative t in the data (i.e., it went
-    # down as expected by the perturbation), the flipped value (-(-t) = +t) is
-    # positive. This makes it rank high, contributing to positive enrichment.
-    # Conversely, if a 'd'-tagged site went up (unexpected), the flipped value
-    # is negative, contributing to negative enrichment.
-    flipped_vec <- setNames(-stats_vec, paste0(names(stats_vec), ";d"))
-    augmented_stats <- c(stats_vec, flipped_vec)
-
     # Sort descending (required by fgsea)
-    augmented_stats <- sort(augmented_stats, decreasing = TRUE)
+    stats_vec <- sort(stats_vec, decreasing = TRUE)
 
-    cat(sprintf("    Augmented stats: %d base + %d flipped = %d total entries\n",
-                length(stats_vec), length(flipped_vec), length(augmented_stats)))
-
-    # Run fgsea with augmented bi-directional stats
+    # Run fgsea
     res <- tryCatch({
         suppressWarnings(fgsea::fgseaMultilevel(
             pathways = pathways,
-            stats = augmented_stats,
+            stats = stats_vec,
             minSize = minSize,
             maxSize = maxSize,
             eps = 0
@@ -306,14 +235,10 @@ run_ptmsea <- function(dps_file, pathways, lookup) {
 
     if (is.null(res) || nrow(res) == 0) return(NULL)
 
-    # Annotate leadingEdge with direction labels for interpretability
-    # Sites ending in ";d" are down-regulated members of the perturbation signature
-    res$leadingEdge <- vapply(res$leadingEdge, function(x) {
-        labels <- ifelse(grepl(";d$", x),
-                         paste0(sub(";d$", "", x), "(dn)"),
-                         paste0(x, "(up)"))
-        paste(labels, collapse = ";")
-    }, character(1))
+    # Convert leadingEdge list to semicolon-separated string for CSV/XLSX output
+    res$leadingEdge <- vapply(res$leadingEdge,
+                              function(x) paste(x, collapse = ";"),
+                              character(1))
 
     # Sort by padj
     res <- res[order(res$padj), ]
@@ -349,7 +274,7 @@ for (i in seq_len(nrow(datasets))) {
 
     for (coll_name in names(collections)) {
         pathways <- collections[[coll_name]]
-        cat("\n  --- Collection:", coll_name, "(bi-directional) ---\n")
+        cat("\n  --- Collection:", coll_name, "---\n")
 
         # Create collection output subdirectory
         coll_out <- file.path(ds_out, coll_name)
@@ -366,15 +291,13 @@ for (i in seq_len(nrow(datasets))) {
             dps_file <- file.path(ds_deg_dir, paste0("DPS_", comp_name, ".csv"))
             cat("    ", comp_label, ":", sep = "")
 
-            res <- run_ptmsea(dps_file, pathways, flank_lookup)
+            res <- run_preranked_gsea(dps_file, pathways, flank_lookup)
 
             if (!is.null(res)) {
                 n_sig <- sum(res$padj < 0.05, na.rm = TRUE)
-                # In PTM-SEA: NES > 0 = concordant, NES < 0 = discordant
-                n_concord <- sum(res$padj < 0.05 & res$NES > 0, na.rm = TRUE)
-                n_discord <- sum(res$padj < 0.05 & res$NES < 0, na.rm = TRUE)
-                cat(" ", nrow(res), "sets tested,", n_sig, "significant",
-                    "(", n_concord, "concordant,", n_discord, "discordant)\n")
+                n_up <- sum(res$padj < 0.05 & res$NES > 0, na.rm = TRUE)
+                n_down <- sum(res$padj < 0.05 & res$NES < 0, na.rm = TRUE)
+                cat(" ", nrow(res), "sets tested,", n_sig, "significant\n")
 
                 # Save CSV
                 fwrite(res, file.path(coll_out, paste0("GSEA_", comp_name, ".csv")))
@@ -386,12 +309,10 @@ for (i in seq_len(nrow(datasets))) {
                 saveWorkbook(wb, file.path(coll_out, paste0("GSEA_", comp_name, ".xlsx")),
                              overwrite = TRUE)
 
-                # Column names kept as _up/_down for backward compatibility
-                # _up = concordant (NES > 0), _down = discordant (NES < 0)
                 summary_row[[paste0(comp_name, "_total")]] <- nrow(res)
                 summary_row[[paste0(comp_name, "_sig")]] <- n_sig
-                summary_row[[paste0(comp_name, "_up")]] <- n_concord
-                summary_row[[paste0(comp_name, "_down")]] <- n_discord
+                summary_row[[paste0(comp_name, "_up")]] <- n_up
+                summary_row[[paste0(comp_name, "_down")]] <- n_down
             } else {
                 cat(" no DPS file or insufficient data\n")
                 summary_row[[paste0(comp_name, "_total")]] <- NA
@@ -446,6 +367,6 @@ for (coll_name in names(all_summaries)) {
 }
 
 cat("====================================================================\n")
-cat("PTM-SEA Pipeline Complete!\n")
+cat("Pipeline Complete!\n")
 cat("All results saved to:", output_dir, "\n")
 cat("====================================================================\n")
