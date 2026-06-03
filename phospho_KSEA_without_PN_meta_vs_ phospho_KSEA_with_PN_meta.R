@@ -215,8 +215,8 @@ for (j in seq_len(nrow(comparisons))) {
     merged$with_PN_down_datasets_name <- unlist(with_PN_down_names_list)
 
     # Reorder columns: priority columns first, then count/name columns, then rest
-    priority_cols <- c("kinase", "Z_meta_phospho_KSEA_without_PN", "padj_phospho_KSEA_without_PN",
-                       "Z_meta_phospho_KSEA_with_PN", "padj_phospho_KSEA_with_PN")
+    priority_cols <- c("kinase", "Z_meta_phospho_KSEA_with_PN", "padj_phospho_KSEA_with_PN",
+                       "Z_meta_phospho_KSEA_without_PN", "padj_phospho_KSEA_without_PN")
     count_name_cols <- c("without_PN_up_datasets_num", "without_PN_down_datasets_num",
                          "without_PN_up_datasets_name", "without_PN_down_datasets_name",
                          "with_PN_up_datasets_num", "with_PN_down_datasets_num",
@@ -236,9 +236,9 @@ for (j in seq_len(nrow(comparisons))) {
         )
     }
 
-    # Sort by Z_meta_phospho_KSEA_without_PN descending
-    if ("Z_meta_phospho_KSEA_without_PN" %in% colnames(merged)) {
-        merged <- merged[order(-merged$Z_meta_phospho_KSEA_without_PN, na.last = TRUE), ]
+    # Sort by Z_meta_phospho_KSEA_with_PN descending
+    if ("Z_meta_phospho_KSEA_with_PN" %in% colnames(merged)) {
+        merged <- merged[order(-merged$Z_meta_phospho_KSEA_with_PN, na.last = TRUE), ]
     }
 
     n_without_PN <- sum(!is.na(without_PN_data$kinase) & without_PN_data$kinase != "")
@@ -300,10 +300,10 @@ for (j in seq_len(nrow(comparisons))) {
         red_rows <- which(z_wo > 0 & z_w > 0 & pa_wo < 0.05 & pa_w < 0.05) + 1
         # Blue: both negative & both significant
         blue_rows <- which(z_wo < 0 & z_w < 0 & pa_wo < 0.05 & pa_w < 0.05) + 1
-        # Orange: without_PN positive & without_PN sig, but NOT (with_PN positive & with_PN sig)
-        orange_rows <- which(z_wo > 0 & pa_wo < 0.05 & !(z_w > 0 & pa_w < 0.05)) + 1
-        # Green: without_PN negative & without_PN sig, but NOT (with_PN negative & with_PN sig)
-        green_rows <- which(z_wo < 0 & pa_wo < 0.05 & !(z_w < 0 & pa_w < 0.05)) + 1
+        # Orange: with_PN positive & with_PN sig, but NOT (without_PN positive & without_PN sig)
+        orange_rows <- which(!(z_wo > 0 & pa_wo < 0.05) & z_w > 0 & pa_w < 0.05) + 1
+        # Green: with_PN negative & with_PN sig, but NOT (without_PN negative & without_PN sig)
+        green_rows <- which(!(z_wo < 0 & pa_wo < 0.05) & z_w < 0 & pa_w < 0.05) + 1
 
         nc <- ncol(merged)
         if (length(red_rows) > 0) {
@@ -458,11 +458,11 @@ for (j in seq_len(nrow(comparisons))) {
     # Blue: Z_meta_without_PN < 0 & Z_meta_with_PN < 0 & both padj < 0.05
     kinase_blue <- df$kinase[df$Z_meta_phospho_KSEA_without_PN < 0 & df$Z_meta_phospho_KSEA_with_PN < 0 & df$padj_phospho_KSEA_without_PN < 0.05 & df$padj_phospho_KSEA_with_PN < 0.05]
 
-    # Orange: Z_meta_without_PN > 0 & padj_without_PN < 0.05, excluding (Z_meta_with_PN > 0 & padj_with_PN < 0.05)
-    kinase_orange <- df$kinase[df$Z_meta_phospho_KSEA_without_PN > 0 & df$padj_phospho_KSEA_without_PN < 0.05 & !(df$Z_meta_phospho_KSEA_with_PN > 0 & df$padj_phospho_KSEA_with_PN < 0.05)]
+    # Orange: Z_meta_with_PN > 0 & padj_with_PN < 0.05, excluding (Z_meta_without_PN > 0 & padj_without_PN < 0.05)
+    kinase_orange <- df$kinase[!(df$Z_meta_phospho_KSEA_without_PN > 0 & df$padj_phospho_KSEA_without_PN < 0.05) & df$Z_meta_phospho_KSEA_with_PN > 0 & df$padj_phospho_KSEA_with_PN < 0.05]
 
-    # Green: Z_meta_without_PN < 0 & padj_without_PN < 0.05, excluding (Z_meta_with_PN < 0 & padj_with_PN < 0.05)
-    kinase_green <- df$kinase[df$Z_meta_phospho_KSEA_without_PN < 0 & df$padj_phospho_KSEA_without_PN < 0.05 & !(df$Z_meta_phospho_KSEA_with_PN < 0 & df$padj_phospho_KSEA_with_PN < 0.05)]
+    # Green: Z_meta_with_PN < 0 & padj_with_PN < 0.05, excluding (Z_meta_without_PN < 0 & padj_without_PN < 0.05)
+    kinase_green <- df$kinase[!(df$Z_meta_phospho_KSEA_without_PN < 0 & df$padj_phospho_KSEA_without_PN < 0.05) & df$Z_meta_phospho_KSEA_with_PN < 0 & df$padj_phospho_KSEA_with_PN < 0.05]
 
     # Apply Rule 1 colors (highest priority, applied last)
     df$fill_color[df$kinase %in% kinase_green] <- "green"
@@ -491,19 +491,19 @@ for (j in seq_len(nrow(comparisons))) {
         label_blue <- kinase_blue
     }
 
-    # Filter orange labels (top 3 Z_meta_without_PN if > 3)
+    # Filter orange labels (top 3 Z_meta_with_PN if > 3)
     if (length(kinase_orange) > 3) {
         orange_df <- df[df$kinase %in% kinase_orange, ]
-        orange_df <- orange_df[order(-Z_meta_phospho_KSEA_without_PN)]
+        orange_df <- orange_df[order(-Z_meta_phospho_KSEA_with_PN)]
         label_orange <- orange_df$kinase[1:3]
     } else {
         label_orange <- kinase_orange
     }
 
-    # Filter green labels (bottom 3 Z_meta_without_PN if > 3)
+    # Filter green labels (bottom 3 Z_meta_with_PN if > 3)
     if (length(kinase_green) > 3) {
         green_df <- df[df$kinase %in% kinase_green, ]
-        green_df <- green_df[order(Z_meta_phospho_KSEA_without_PN)]
+        green_df <- green_df[order(Z_meta_phospho_KSEA_with_PN)]
         label_green <- green_df$kinase[1:3]
     } else {
         label_green <- kinase_green
@@ -539,12 +539,12 @@ for (j in seq_len(nrow(comparisons))) {
     df_label <- df[show_label == TRUE]
 
     # Let each axis adapt to its own data range (with 5% padding)
-    x_range <- range(df$Z_meta_phospho_KSEA_without_PN, na.rm = TRUE)
-    y_range <- range(df$Z_meta_phospho_KSEA_with_PN, na.rm = TRUE)
+    x_range <- range(df$Z_meta_phospho_KSEA_with_PN, na.rm = TRUE)
+    y_range <- range(df$Z_meta_phospho_KSEA_without_PN, na.rm = TRUE)
     x_pad <- diff(x_range) * 0.05
     y_pad <- diff(y_range) * 0.05
 
-    p <- ggplot(df, aes(x = Z_meta_phospho_KSEA_without_PN, y = Z_meta_phospho_KSEA_with_PN)) +
+    p <- ggplot(df, aes(x = Z_meta_phospho_KSEA_with_PN, y = Z_meta_phospho_KSEA_without_PN)) +
         # y=x reference line
         geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "grey50", linewidth = 0.4) +
         # Background grey points
@@ -577,8 +577,8 @@ for (j in seq_len(nrow(comparisons))) {
             clip = "off"
         ) +
         labs(
-            x = "Phospho KSEA without PN Z_meta",
-            y = "Phospho KSEA with PN Z_meta",
+            x = "Phospho KSEA with PN Z_meta",
+            y = "Phospho KSEA without PN Z_meta",
             title = gsub("_", " ", comp_name)
         ) +
         theme_classic(base_size = 10) +

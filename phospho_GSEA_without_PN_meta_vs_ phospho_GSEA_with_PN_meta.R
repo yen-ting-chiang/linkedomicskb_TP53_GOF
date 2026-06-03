@@ -238,8 +238,8 @@ for (coll_name in collection_names) {
         merged$with_PN_down_datasets_name <- unlist(with_PN_down_names_list)
 
         # Reorder columns: priority columns first, then count/name columns, then rest
-        priority_cols <- c("pathway", "Z_meta_phospho_GSEA_without_PN", "padj_phospho_GSEA_without_PN",
-                           "Z_meta_phospho_GSEA_with_PN", "padj_phospho_GSEA_with_PN")
+        priority_cols <- c("pathway", "Z_meta_phospho_GSEA_with_PN", "padj_phospho_GSEA_with_PN",
+                           "Z_meta_phospho_GSEA_without_PN", "padj_phospho_GSEA_without_PN")
         count_name_cols <- c("without_PN_up_datasets_num", "without_PN_down_datasets_num",
                              "without_PN_up_datasets_name", "without_PN_down_datasets_name",
                              "with_PN_up_datasets_num", "with_PN_down_datasets_num",
@@ -259,9 +259,9 @@ for (coll_name in collection_names) {
             )
         }
 
-        # Sort by Z_meta_phospho_GSEA_without_PN descending
-        if ("Z_meta_phospho_GSEA_without_PN" %in% colnames(merged)) {
-            merged <- merged[order(-merged$Z_meta_phospho_GSEA_without_PN, na.last = TRUE), ]
+        # Sort by Z_meta_phospho_GSEA_with_PN descending
+        if ("Z_meta_phospho_GSEA_with_PN" %in% colnames(merged)) {
+            merged <- merged[order(-merged$Z_meta_phospho_GSEA_with_PN, na.last = TRUE), ]
         }
 
         n_without_PN <- sum(!is.na(without_PN_data$pathway) & without_PN_data$pathway != "")
@@ -323,10 +323,10 @@ for (coll_name in collection_names) {
             red_rows <- which(z_wo > 0 & z_w > 0 & pa_wo < 0.05 & pa_w < 0.05) + 1
             # Blue: both negative & both significant
             blue_rows <- which(z_wo < 0 & z_w < 0 & pa_wo < 0.05 & pa_w < 0.05) + 1
-            # Orange: without_PN positive & without_PN sig, but NOT (with_PN positive & with_PN sig)
-            orange_rows <- which(z_wo > 0 & pa_wo < 0.05 & !(z_w > 0 & pa_w < 0.05)) + 1
-            # Green: without_PN negative & without_PN sig, but NOT (with_PN negative & with_PN sig)
-            green_rows <- which(z_wo < 0 & pa_wo < 0.05 & !(z_w < 0 & pa_w < 0.05)) + 1
+            # Orange: with_PN positive & with_PN sig, but NOT (without_PN positive & without_PN sig)
+            orange_rows <- which(!(z_wo > 0 & pa_wo < 0.05) & z_w > 0 & pa_w < 0.05) + 1
+            # Green: with_PN negative & with_PN sig, but NOT (without_PN negative & without_PN sig)
+            green_rows <- which(!(z_wo < 0 & pa_wo < 0.05) & z_w < 0 & pa_w < 0.05) + 1
 
             nc <- ncol(merged)
             if (length(red_rows) > 0) {
@@ -487,11 +487,11 @@ for (coll_name in collections_to_plot) {
         # Blue: Z_meta_without_PN < 0 & Z_meta_with_PN < 0 & both padj < 0.05
         path_blue <- df$pathway[df$Z_meta_phospho_GSEA_without_PN < 0 & df$Z_meta_phospho_GSEA_with_PN < 0 & df$padj_phospho_GSEA_without_PN < 0.05 & df$padj_phospho_GSEA_with_PN < 0.05]
 
-        # Orange: Z_meta_without_PN > 0 & padj_without_PN < 0.05, excluding (Z_meta_with_PN > 0 & padj_with_PN < 0.05)
-        path_orange <- df$pathway[df$Z_meta_phospho_GSEA_without_PN > 0 & df$padj_phospho_GSEA_without_PN < 0.05 & !(df$Z_meta_phospho_GSEA_with_PN > 0 & df$padj_phospho_GSEA_with_PN < 0.05)]
+        # Orange: Z_meta_with_PN > 0 & padj_with_PN < 0.05, excluding (Z_meta_without_PN > 0 & padj_without_PN < 0.05)
+        path_orange <- df$pathway[!(df$Z_meta_phospho_GSEA_without_PN > 0 & df$padj_phospho_GSEA_without_PN < 0.05) & df$Z_meta_phospho_GSEA_with_PN > 0 & df$padj_phospho_GSEA_with_PN < 0.05]
 
-        # Green: Z_meta_without_PN < 0 & padj_without_PN < 0.05, excluding (Z_meta_with_PN < 0 & padj_with_PN < 0.05)
-        path_green <- df$pathway[df$Z_meta_phospho_GSEA_without_PN < 0 & df$padj_phospho_GSEA_without_PN < 0.05 & !(df$Z_meta_phospho_GSEA_with_PN < 0 & df$padj_phospho_GSEA_with_PN < 0.05)]
+        # Green: Z_meta_with_PN < 0 & padj_with_PN < 0.05, excluding (Z_meta_without_PN < 0 & padj_without_PN < 0.05)
+        path_green <- df$pathway[!(df$Z_meta_phospho_GSEA_without_PN < 0 & df$padj_phospho_GSEA_without_PN < 0.05) & df$Z_meta_phospho_GSEA_with_PN < 0 & df$padj_phospho_GSEA_with_PN < 0.05]
 
         # Apply Rule 1 colors (highest priority, applied last)
         df$fill_color[df$pathway %in% path_green] <- "green"
@@ -520,19 +520,19 @@ for (coll_name in collections_to_plot) {
             label_blue <- path_blue
         }
 
-        # Filter orange labels (top 3 Z_meta_without_PN if > 3)
+        # Filter orange labels (top 3 Z_meta_with_PN if > 3)
         if (length(path_orange) > 3) {
             orange_df <- df[df$pathway %in% path_orange, ]
-            orange_df <- orange_df[order(-Z_meta_phospho_GSEA_without_PN)]
+            orange_df <- orange_df[order(-Z_meta_phospho_GSEA_with_PN)]
             label_orange <- orange_df$pathway[1:3]
         } else {
             label_orange <- path_orange
         }
 
-        # Filter green labels (bottom 3 Z_meta_without_PN if > 3)
+        # Filter green labels (bottom 3 Z_meta_with_PN if > 3)
         if (length(path_green) > 3) {
             green_df <- df[df$pathway %in% path_green, ]
-            green_df <- green_df[order(Z_meta_phospho_GSEA_without_PN)]
+            green_df <- green_df[order(Z_meta_phospho_GSEA_with_PN)]
             label_green <- green_df$pathway[1:3]
         } else {
             label_green <- path_green
@@ -568,12 +568,12 @@ for (coll_name in collections_to_plot) {
         df_label <- df[show_label == TRUE]
 
         # Let each axis adapt to its own data range (with 5% padding)
-        x_range <- range(df$Z_meta_phospho_GSEA_without_PN, na.rm = TRUE)
-        y_range <- range(df$Z_meta_phospho_GSEA_with_PN, na.rm = TRUE)
+        x_range <- range(df$Z_meta_phospho_GSEA_with_PN, na.rm = TRUE)
+        y_range <- range(df$Z_meta_phospho_GSEA_without_PN, na.rm = TRUE)
         x_pad <- diff(x_range) * 0.05
         y_pad <- diff(y_range) * 0.05
 
-        p <- ggplot(df, aes(x = Z_meta_phospho_GSEA_without_PN, y = Z_meta_phospho_GSEA_with_PN)) +
+        p <- ggplot(df, aes(x = Z_meta_phospho_GSEA_with_PN, y = Z_meta_phospho_GSEA_without_PN)) +
             # y=x reference line
             geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "grey50", linewidth = 0.4) +
             # Background grey points
@@ -606,8 +606,8 @@ for (coll_name in collections_to_plot) {
                 clip = "off"
             ) +
             labs(
-                x = "Phospho GSEA without PN Z_meta",
-                y = "Phospho GSEA with PN Z_meta",
+                x = "Phospho GSEA with PN Z_meta",
+                y = "Phospho GSEA without PN Z_meta",
                 title = paste(gsub("_", " ", comp_name), "-", coll_name)
             ) +
             theme_classic(base_size = 10) +
