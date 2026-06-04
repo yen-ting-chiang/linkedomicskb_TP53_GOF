@@ -71,7 +71,7 @@ comparisons <- data.frame(
 min_studies <- 2
 
 cat("====================================================================\n")
-cat("TP53 phosphoprotein-Level DPS Cross-Cancer Meta-Analysis\n")
+cat("TP53 phosphoprotein-Level DPS with protein normalization Cross-Cancer Meta-Analysis\n")
 cat("Method: Stouffer's Weighted Z-score (weight = sqrt(sample_size))\n")
 cat("====================================================================\n\n")
 
@@ -487,36 +487,56 @@ cat("DPS Meta-Analysis Complete. Proceeding to Meta-GSEA...\n")
 cat("====================================================================\n")
 
 # ==============================================================================
-# Section 7: Load Gene Sets from PTMsigDB (for Meta-GSEA)
+# Section 7: Load Gene Sets from PTMsigDB (Bi-directional, for Meta-GSEA)
 # ==============================================================================
-# Methodology reference:
+# Methodology references:
 #   - Shen K, Tseng GC. Meta-analysis for pathway enrichment analysis when
 #     combining multiple genomic studies. Bioinformatics. 2010;26(10):1316-23.
 #     PMID: 20410053
 #   This approach corresponds to MAPE_G (gene-level meta-analysis followed by
 #   GSEA), where gene-level statistics are first combined across studies, and
 #   the resulting meta-statistics are used as ranking for preranked GSEA.
+#
+#   - Krug K, et al. A Curated Resource for Phosphosite-specific Signature
+#     Analysis. Mol Cell Proteomics. 2019;18(3):576-593.
+#     DOI: 10.1074/mcp.TIR118.000943
+#   PTMsigDB perturbation signatures contain BOTH up- and down-regulated
+#   phosphosites (indicated by site.direction = 'u' or 'd'). To properly
+#   score concordance, we implement bi-directional enrichment:
+#     - For 'u'-tagged sites: original Z_meta is used as ranking metric
+#     - For 'd'-tagged sites: sign-flipped Z_meta (-Z_meta) is used
+#   This ensures that when data matches the expected perturbation pattern
+#   (u-sites up AND d-sites down), the NES is strongly positive.
 
 cat("\n====================================================================\n")
-cat("Meta-GSEA: Preranked GSEA on Cross-Cancer Z_meta Scores (PTMsigDB)\n")
+cat("Meta-GSEA: Preranked PTM-SEA on Cross-Cancer Z_meta Scores (PTMsigDB, Bi-directional)\n")
 cat("====================================================================\n\n")
 
-cat("Loading PTMsigDB gene sets...\n")
+cat("Loading PTMsigDB gene sets (with direction information)...\n")
 
-#' Read PTMsigDB and build pathway lists keyed by GENE_SITE identifier
-#' Also build a flanking-sequence-to-gene_site lookup table for ID mapping
+#' Read PTMsigDB and build bi-directional pathway lists
+#'
+#' Each PTMsigDB perturbation signature contains phosphosites tagged with
+#' direction ('u' = up-regulated, 'd' = down-regulated after perturbation).
+#' To enable bi-directional scoring with fgsea, this function creates
+#' direction-aware gene_site IDs:
+#'   - 'u'-tagged sites: stored as "GENE_SITE" (no suffix)
+#'   - 'd'-tagged sites: stored as "GENE_SITE;d"
+#'
+#' At runtime, the stats vector is augmented with sign-flipped entries
+#' ("GENE_SITE;d" -> -Z_meta), so fgsea correctly scores concordance.
 #'
 #' @param fp Path to PTMsigDB xlsx file
 #' @return A list with two elements:
-#'   - pathways: named list of character vectors (signature -> gene_site IDs)
-#'   - flank_lookup: named character vector (flanking_seq -> gene_site)
+#'   - pathways: named list of character vectors (signature -> direction-aware IDs)
+#'   - flank_lookup: named character vector (flanking_seq -> base gene_site)
 read_ptmsigdb <- function(fp) {
     if (!file.exists(fp)) {
         stop("[PTMsigDB] File does not exist: ", fp)
     }
 
     df <- readxl::read_xlsx(fp)
-    req <- c("signature", "site.annotation", "site.flanking")
+    req <- c("signature", "site.annotation", "site.flanking", "site.direction")
     if (!all(req %in% names(df))) {
         stop("[PTMsigDB] xlsx is missing necessary fields: ",
              paste(setdiff(req, names(df)), collapse = ", "))
@@ -528,16 +548,40 @@ read_ptmsigdb <- function(fp) {
     # Extract flanking sequence (15-mer)
     flanking <- toupper(trimws(df$site.flanking))
 
-    # Build pathway lists keyed by gene_site
-    by_sig <- split(gene_site, df$signature)
+    # Extract site direction (u = up-regulated, d = down-regulated in perturbation)
+    direction <- tolower(trimws(df$site.direction))
+
+    # Build direction-aware gene_site IDs for bi-directional scoring:
+    #   'u'-tagged sites -> "GENE_SITE"   (original Z_meta will be used by fgsea)
+    #   'd'-tagged sites -> "GENE_SITE;d" (sign-flipped Z_meta will be used)
+    dir_gene_site <- ifelse(direction == "d",
+                            paste0(gene_site, ";d"),
+                            gene_site)
+
+    # Build pathway lists with direction-aware IDs
+    by_sig <- split(dir_gene_site, df$signature)
     pathways <- lapply(by_sig, function(v) unique(v[nzchar(v)]))
     pathways[lengths(pathways) == 0] <- NULL
 
-    # Build flanking-to-gene_site lookup
-    # Use unique flanking sequences; for duplicates, keep first occurrence
+    # Build flanking-to-gene_site lookup (maps to BASE gene_site without direction)
+    # Direction is signature-specific, so the flanking lookup stores only base IDs
     valid <- nzchar(flanking) & nzchar(gene_site) & nchar(flanking) == 15
     flank_lookup <- setNames(gene_site[valid], flanking[valid])
     flank_lookup <- flank_lookup[!duplicated(names(flank_lookup))]
+
+    # Report direction statistics
+    n_up <- sum(direction == "u", na.rm = TRUE)
+    n_dn <- sum(direction == "d", na.rm = TRUE)
+    sigs_with_u <- unique(df$signature[direction == "u"])
+    sigs_with_d <- unique(df$signature[direction == "d"])
+    n_bidir <- length(intersect(sigs_with_u, sigs_with_d))
+
+    cat("  [PTMsigDB] Direction breakdown:\n")
+    cat("    Total rows:", nrow(df), "\n")
+    cat("    Up-tagged sites (u):", n_up, "\n")
+    cat("    Down-tagged sites (d):", n_dn, "\n")
+    cat("    Bi-directional signatures (contain both u and d):",
+        n_bidir, "of", length(pathways), "\n")
 
     list(pathways = pathways, flank_lookup = flank_lookup)
 }
@@ -547,7 +591,7 @@ ptmsigdb_data <- read_ptmsigdb(ptmsigdb_file)
 pathways_ptm <- ptmsigdb_data$pathways
 flank_lookup <- ptmsigdb_data$flank_lookup
 
-cat("  PTMsigDB:", length(pathways_ptm), "phosphosite sets\n")
+cat("  PTMsigDB:", length(pathways_ptm), "phosphosite sets (bi-directional)\n")
 cat("  Flanking lookup table:", length(flank_lookup), "unique 15-mer entries\n\n")
 
 # Named list for iteration (single collection for phosphoproteomics)
@@ -555,12 +599,12 @@ gsea_collections <- list(
     PTMsigDB = pathways_ptm
 )
 
-# fgsea parameters (same as per-cancer phosphoprotein GSEA pipeline)
+# fgsea parameters (same as per-cancer phosphoprotein with protein normalization GSEA pipeline)
 gsea_minSize <- 5
 gsea_maxSize <- 500
 
 # ==============================================================================
-# Section 8: Meta-GSEA Function (Phosphoprotein)
+# Section 8: Meta-GSEA Function (PTM-SEA Bi-directional Scoring)
 # ==============================================================================
 
 #' Map DPS phosphosite IDs to PTMsigDB gene_site IDs via flanking sequence
@@ -593,10 +637,21 @@ map_dps_to_ptmsigdb <- function(dps_ids, lookup) {
     mapped
 }
 
-#' Run fgsea preranked GSEA from a META_DPS file using Z_meta as ranking
+#' Run PTM-SEA bi-directional scoring from a META_DPS file using Z_meta
+#'
+#' Creates an augmented stats vector with sign-flipped entries for 'd'-tagged
+#' sites, enabling bi-directional concordance scoring:
+#'   - "GENE_SITE"   -> original Z_meta (for 'u'-tagged pathway members)
+#'   - "GENE_SITE;d" -> -Z_meta (sign-flipped, for 'd'-tagged pathway members)
+#'
+#' Interpretation of results:
+#'   - Positive NES: data is CONCORDANT with the perturbation signature
+#'     (u-sites tend to be up AND d-sites tend to be down in data)
+#'   - Negative NES: data is DISCORDANT with the perturbation signature
+#'
 #' @param meta_file Path to META_DPS CSV file
-#' @param pathways Named list of phosphosite sets (gene_site IDs)
-#' @param lookup Flanking-to-gene_site lookup table
+#' @param pathways Named list of direction-aware phosphosite sets
+#' @param lookup Flanking-to-gene_site lookup table (base IDs)
 #' @return fgsea result data.frame or NULL
 run_meta_gsea <- function(meta_file, pathways, lookup) {
     if (!file.exists(meta_file)) return(NULL)
@@ -620,7 +675,7 @@ run_meta_gsea <- function(meta_file, pathways, lookup) {
     mapped_ids <- gene_site_ids[mapped_mask]
     mapped_z <- meta$Z_meta[mapped_mask]
 
-    # Build named vector of Z_meta statistics
+    # Build named vector of Z_meta statistics (base gene_site IDs)
     stats_vec <- setNames(mapped_z, mapped_ids)
 
     # Remove duplicates (keep first = most significant by padj ordering)
@@ -634,14 +689,30 @@ run_meta_gsea <- function(meta_file, pathways, lookup) {
         return(NULL)
     }
 
-    # Sort descending (required by fgsea)
-    stats_vec <- sort(stats_vec, decreasing = TRUE)
+    # ---- PTM-SEA bi-directional augmentation ----
+    # Create sign-flipped entries for bi-directional scoring:
+    #   Original:  "GENE_SITE"   -> Z_meta   (used by 'u'-tagged pathway members)
+    #   Flipped:   "GENE_SITE;d" -> -Z_meta  (used by 'd'-tagged pathway members)
+    #
+    # Logic: when a 'd'-tagged site has negative Z_meta in the data (i.e., it went
+    # down as expected by the perturbation), the flipped value (-(-Z) = +Z) is
+    # positive. This makes it rank high, contributing to positive enrichment.
+    # Conversely, if a 'd'-tagged site went up (unexpected), the flipped value
+    # is negative, contributing to negative enrichment.
+    flipped_vec <- setNames(-stats_vec, paste0(names(stats_vec), ";d"))
+    augmented_stats <- c(stats_vec, flipped_vec)
 
-    # Run fgsea
+    # Sort descending (required by fgsea)
+    augmented_stats <- sort(augmented_stats, decreasing = TRUE)
+
+    cat(sprintf("    Augmented stats: %d base + %d flipped = %d total entries\n",
+                length(stats_vec), length(flipped_vec), length(augmented_stats)))
+
+    # Run fgsea with augmented bi-directional stats
     res <- tryCatch({
         suppressWarnings(fgsea::fgseaMultilevel(
             pathways = pathways,
-            stats = stats_vec,
+            stats = augmented_stats,
             minSize = gsea_minSize,
             maxSize = gsea_maxSize,
             eps = 0
@@ -653,10 +724,14 @@ run_meta_gsea <- function(meta_file, pathways, lookup) {
 
     if (is.null(res) || nrow(res) == 0) return(NULL)
 
-    # Convert leadingEdge list to semicolon-separated string for CSV/XLSX output
-    res$leadingEdge <- vapply(res$leadingEdge,
-                              function(x) paste(x, collapse = ";"),
-                              character(1))
+    # Annotate leadingEdge with direction labels for interpretability
+    # Sites ending in ";d" are down-regulated members of the perturbation signature
+    res$leadingEdge <- vapply(res$leadingEdge, function(x) {
+        labels <- ifelse(grepl(";d$", x),
+                         paste0(sub(";d$", "", x), "(dn)"),
+                         paste0(x, "(up)"))
+        paste(labels, collapse = ";")
+    }, character(1))
 
     # Sort by padj
     res <- res[order(res$padj), ]
@@ -664,10 +739,10 @@ run_meta_gsea <- function(meta_file, pathways, lookup) {
 }
 
 # ==============================================================================
-# Section 9: Run Meta-GSEA for Each Comparison
+# Section 9: Run Meta-GSEA (Bi-directional) for Each Comparison
 # ==============================================================================
 
-gsea_output_dir <- file.path(output_dir, "phosphoprotein_meta_GSEA")
+gsea_output_dir <- file.path(output_dir, "meta_GSEA")
 dir.create(gsea_output_dir, recursive = TRUE, showWarnings = FALSE)
 
 # Storage for GSEA summary statistics (one per collection)
@@ -698,7 +773,7 @@ for (j in seq_len(nrow(comparisons))) {
 
     for (coll_name in names(gsea_collections)) {
         pathways <- gsea_collections[[coll_name]]
-        cat("\n  --- Collection:", coll_name, "---\n")
+        cat("\n  --- Collection:", coll_name, "(bi-directional) ---\n")
 
         # Create collection output subdirectory
         coll_out <- file.path(gsea_output_dir, coll_name)
@@ -713,9 +788,11 @@ for (j in seq_len(nrow(comparisons))) {
 
         if (!is.null(res)) {
             n_sig <- sum(res$padj < 0.05, na.rm = TRUE)
-            n_up <- sum(res$padj < 0.05 & res$NES > 0, na.rm = TRUE)
-            n_down <- sum(res$padj < 0.05 & res$NES < 0, na.rm = TRUE)
-            cat(" ", nrow(res), "sets tested,", n_sig, "significant\n")
+            # In PTM-SEA: NES > 0 = concordant, NES < 0 = discordant
+            n_concord <- sum(res$padj < 0.05 & res$NES > 0, na.rm = TRUE)
+            n_discord <- sum(res$padj < 0.05 & res$NES < 0, na.rm = TRUE)
+            cat(" ", nrow(res), "sets tested,", n_sig, "significant",
+                "(", n_concord, "concordant,", n_discord, "discordant)\n")
 
             # Save CSV
             fwrite(res, file.path(coll_out, paste0("META_GSEA_", comp_name, ".csv")))
@@ -727,10 +804,12 @@ for (j in seq_len(nrow(comparisons))) {
             saveWorkbook(wb, file.path(coll_out, paste0("META_GSEA_", comp_name, ".xlsx")),
                          overwrite = TRUE)
 
+            # Column names kept as _up/_down for backward compatibility
+            # _up = concordant (NES > 0), _down = discordant (NES < 0)
             summary_row[[paste0(comp_name, "_total")]] <- nrow(res)
             summary_row[[paste0(comp_name, "_sig")]] <- n_sig
-            summary_row[[paste0(comp_name, "_up")]] <- n_up
-            summary_row[[paste0(comp_name, "_down")]] <- n_down
+            summary_row[[paste0(comp_name, "_up")]] <- n_concord
+            summary_row[[paste0(comp_name, "_down")]] <- n_discord
         } else {
             cat(" no META_DPS file or insufficient data\n")
             summary_row[[paste0(comp_name, "_total")]] <- NA
@@ -864,11 +943,12 @@ run_meta_ksea <- function(meta_file, lookup) {
         Residue.Both = residues,
         p = mapped_p,
         FC = 2^mapped_z,  # Convert Z_meta to fold change scale
+        Z_meta = mapped_z,
         stringsAsFactors = FALSE
     )
 
     # Dedup PX to ensure one entry per Gene_Residue (keep max absolute Z_meta)
-    PX$abs_z <- abs(mapped_z)
+    PX$abs_z <- abs(PX$Z_meta)
     PX <- PX %>%
         group_by(Gene, Residue.Both) %>%
         slice_max(abs_z, n = 1, with_ties = FALSE) %>%
@@ -890,13 +970,51 @@ run_meta_ksea <- function(meta_file, lookup) {
 
     if (is.null(res) || nrow(res) == 0) return(NULL)
 
+    # Convert to data.frame just in case
+    res <- as.data.frame(res)
+
+    # Add matched substrates (all intersecting substrates)
+    res$matched_substrates <- vapply(res$Kinase.Gene, function(k) {
+        ks_subset <- KSData[KSData$GENE == k, ]
+        matched_sites <- paste0(ks_subset$SUB_GENE, "_", ks_subset$SUB_MOD_RSD)
+        px_sites <- paste0(PX$Gene, "_", PX$Residue.Both)
+        
+        intersect_sites <- intersect(matched_sites, px_sites)
+        paste(intersect_sites, collapse = ";")
+    }, character(1))
+
+    # Add pseudo-leading edge substrates (significant and matching kinase direction)
+    res$leadingEdge_substrates <- vapply(seq_len(nrow(res)), function(i) {
+        k <- res$Kinase.Gene[i]
+        k_z <- res$z.score[i]
+        
+        ks_subset <- KSData[KSData$GENE == k, ]
+        matched_sites <- paste0(ks_subset$SUB_GENE, "_", ks_subset$SUB_MOD_RSD)
+        
+        px_subset <- PX[paste0(PX$Gene, "_", PX$Residue.Both) %in% matched_sites, ]
+        
+        # Filter for significant substrates (p < 0.05) and direction matching kinase
+        if (!is.na(k_z) && k_z > 0) {
+            # Kinase activated: looking for upregulated substrates
+            sig_sites <- px_subset[!is.na(px_subset$p) & px_subset$p < 0.05 & !is.na(px_subset$Z_meta) & px_subset$Z_meta > 0, ]
+        } else if (!is.na(k_z) && k_z < 0) {
+            # Kinase deactivated: looking for downregulated substrates
+            sig_sites <- px_subset[!is.na(px_subset$p) & px_subset$p < 0.05 & !is.na(px_subset$Z_meta) & px_subset$Z_meta < 0, ]
+        } else {
+            sig_sites <- px_subset[0, ] # Empty if z-score is exactly 0 or NA
+        }
+        
+        sig_sites_str <- paste0(sig_sites$Gene, "_", sig_sites$Residue.Both)
+        paste(sig_sites_str, collapse = ";")
+    }, character(1))
+
     # Sort by FDR
     res <- res[order(res$FDR), ]
     as.data.frame(res)
 }
 
 # KSEA output directory
-ksea_output_dir <- file.path(output_dir, "phosphoprotein_meta_KSEA")
+ksea_output_dir <- file.path(output_dir, "meta_KSEA")
 dir.create(ksea_output_dir, recursive = TRUE, showWarnings = FALSE)
 
 # Storage for KSEA summary
