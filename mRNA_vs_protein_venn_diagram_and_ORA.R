@@ -36,14 +36,29 @@ meta_data <- meta_data %>% filter(!is.na(gene_symbol) & gene_symbol != "")
 msig_h <- msigdbr(species = "Homo sapiens", category = "H") %>% 
   dplyr::select(gs_name, gene_symbol)
 
+# Define ORA background universe: all unique gene symbols detected in the
+# integrated (inner join) dataset. This ensures the Fisher's exact test
+# denominator reflects the experimentally observable gene space, rather than
+# defaulting to all genes present in MSigDB Hallmark.
+# Reference: Timmons JA, et al. Multiple sources of bias confound functional
+#   enrichment analysis of global -omics data. Genome Biol. 2015;16:186.
+#   PMID: 26346307
+# Reference: Wijesooriya K, et al. Urgent need for consistent standards in
+#   functional enrichment analysis. PLoS Comput Biol. 2022;18(3):e1009935.
+#   PMID: 35263338
+ora_universe <- unique(meta_data$gene_symbol)
+ora_universe <- ora_universe[!is.na(ora_universe) & ora_universe != ""]
+cat("ORA background universe:", length(ora_universe), "unique genes\n")
+
 # Function to perform ORA and plot results
-perform_ora_and_plot <- function(gene_list, region_name, out_dir) {
+perform_ora_and_plot <- function(gene_list, region_name, out_dir, universe) {
   gene_list <- gene_list[!is.na(gene_list) & gene_list != ""]
   if (length(gene_list) == 0) return(NULL)
   
   # Perform ORA using clusterProfiler
   # Set cutoffs to 1 to ensure we can pad up to 5 even if non-significant
-  ora_res <- enricher(gene = gene_list, TERM2GENE = msig_h, pvalueCutoff = 1, qvalueCutoff = 1)
+  ora_res <- enricher(gene = gene_list, TERM2GENE = msig_h, universe = universe,
+                      pvalueCutoff = 1, qvalueCutoff = 1)
   
   if (!is.null(ora_res) && nrow(as.data.frame(ora_res)) > 0) {
     res_df <- as.data.frame(ora_res)
@@ -217,9 +232,9 @@ dev.off()
 # ==============================================================================
 # 1.5. ORA for UP-regulated regions
 # ==============================================================================
-perform_ora_and_plot(up_regions$Only_mRNA, "UP_Only_mRNA", output_dir)
-perform_ora_and_plot(up_regions$Intersection, "UP_Intersection", output_dir)
-perform_ora_and_plot(up_regions$Only_protein, "UP_Only_protein", output_dir)
+perform_ora_and_plot(up_regions$Only_mRNA, "UP_Only_mRNA", output_dir, ora_universe)
+perform_ora_and_plot(up_regions$Intersection, "UP_Intersection", output_dir, ora_universe)
+perform_ora_and_plot(up_regions$Only_protein, "UP_Only_protein", output_dir, ora_universe)
 
 # ==============================================================================
 # 2. Process DOWN-regulated genes
@@ -282,9 +297,9 @@ dev.off()
 # ==============================================================================
 # 2.5. ORA for DOWN-regulated regions
 # ==============================================================================
-perform_ora_and_plot(down_regions$Only_mRNA, "DOWN_Only_mRNA", output_dir)
-perform_ora_and_plot(down_regions$Intersection, "DOWN_Intersection", output_dir)
-perform_ora_and_plot(down_regions$Only_protein, "DOWN_Only_protein", output_dir)
+perform_ora_and_plot(down_regions$Only_mRNA, "DOWN_Only_mRNA", output_dir, ora_universe)
+perform_ora_and_plot(down_regions$Intersection, "DOWN_Intersection", output_dir, ora_universe)
+perform_ora_and_plot(down_regions$Only_protein, "DOWN_Only_protein", output_dir, ora_universe)
 
 print("Venn diagrams, region lists, and ORA analysis have been successfully generated.")
 

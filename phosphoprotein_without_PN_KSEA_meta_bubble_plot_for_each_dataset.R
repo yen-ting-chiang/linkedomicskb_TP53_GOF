@@ -75,24 +75,23 @@ kinases_to_plot <- c(
     "CDK1",
     "CDK2",
     "CHEK2",
-    "CSNK2A1",
-    "AKT1",
     "CDK6",
-    "ATM",
-    "ATR",
-    "CDK7",
-    "PLK3",
     "ALK",
-    "MAPK1",
-    "PRKDC",
-    "CSNK1A1",
-    "CSNK2A2"
+    "PRKCA",
+    "PRKCZ",
+    "MAPK3",
+    "PRKCD",
+    "CDC7"#,
+    #"ALK",
+    #"MAPK1",
+    #"CSNK1A1",
+    #"CSNK2A2"
 )
 
 # ==============================================================================
 # Section 3: Define Color Palettes
 # ==============================================================================
-# All 4 color schemes will be generated. USER can select preferred one afterward.
+# Multiple color schemes are provided. USER can select preferred ones to generate.
 
 color_schemes <- list(
     # Palette 1: Red-Blue (RdBu reversed) - Nature, Cell common
@@ -111,10 +110,10 @@ color_schemes <- list(
         mid    = "#FFFFBF",   # Yellow
         high   = "#A50026"    # Dark red
     ),
-    # Palette 3: Purple-Green (PRGn reversed) - colorblind-friendly
+    # Palette 3: Purple-Green (PRGn reversed) - Colorblind-friendly
     "PRGn" = list(
         name   = "PRGn",
-        label  = "Purple-Green (colorblind-friendly)",
+        label  = "Purple-Green (Colorblind-friendly)",
         low    = "#762A83",   # Purple (negative)
         mid    = "#F7F7F7",   # White
         high   = "#1B7837"    # Green (positive)
@@ -126,14 +125,46 @@ color_schemes <- list(
         low    = "#D73027",   # Red (negative)
         mid    = "#FFFFBF",   # Yellow
         high   = "#1A9850"    # Green (positive)
+    ),
+    # Palette 5: Purple-Orange (PuOr reversed) - Colorblind-friendly
+    "PuOr" = list(
+        name   = "PuOr",
+        label  = "Purple-Orange (Colorblind-friendly)",
+        low    = "#542788",   # Deep Purple (negative)
+        mid    = "#F7F7F7",   # White
+        high   = "#B35806"    # Deep Orange (positive)
+    ),
+    # Palette 6: Brown-BlueGreen (BrBG reversed) - Lancet/Clinical style
+    "BrBG" = list(
+        name   = "BrBG",
+        label  = "Brown-Teal (Clinical style)",
+        low    = "#8C510A",   # Brown (negative)
+        mid    = "#F5F5F5",   # White
+        high   = "#01665E"    # Teal/BlueGreen (positive)
+    ),
+    # Palette 7: Cyan-Magenta - Modern/NEJM alternative, Colorblind-friendly
+    "CyanMagenta" = list(
+        name   = "CyanMagenta",
+        label  = "Cyan-Magenta (Modern style)",
+        low    = "#008B8B",   # Dark Cyan (negative)
+        mid    = "#F7F7F7",   # White
+        high   = "#C71585"    # Medium Violet Red / Magenta (positive)
+    ),
+    # Palette 8: Navy-Firebrick - Classic clean look
+    "NavyFirebrick" = list(
+        name   = "NavyFirebrick",
+        label  = "Navy-Firebrick (Classic)",
+        low    = "#000080",   # Navy (negative)
+        mid    = "#FFFFFF",   # White
+        high   = "#B22222"    # Firebrick Red (positive)
     )
 )
 # USER: Specify which color schemes to generate.
-# Select one or more from: "RdBu", "RdYlBu", "PRGn", "RdYlGn"
+# Select one or more from: "RdBu", "RdYlBu", "PRGn", "RdYlGn", "PuOr", "BrBG", "CyanMagenta", "NavyFirebrick"
 # To generate all schemes, keep it as: names(color_schemes)
 
 # selected_color_schemes <- names(color_schemes)
-selected_color_schemes <- c("RdBu", "PRGn")
+selected_color_schemes <- c("RdBu", "PRGn", "BrBG", "NavyFirebrick")
 
 # Two analysis levels to plot separately
 analysis_levels <- c("phospho_KSEA_without_PN", "phospho_KSEA_with_PN")
