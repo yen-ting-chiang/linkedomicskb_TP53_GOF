@@ -69,6 +69,7 @@ suppressPackageStartupMessages({
     library(msigdbr)
     library(clusterProfiler)
     library(openxlsx)
+    library(ggplot2)
 })
 
 set.seed(1234)
@@ -129,6 +130,57 @@ collections_to_use <- NULL  # NULL = use all collections
 
 # To run only specific collections, uncomment and modify the line below:
 # collections_to_use <- c("Hallmark", "C2_CP_REACTOME", "C5_GO_BP", "C6_Oncogenic")
+
+# ---- User-configurable: Bubble Plot Settings ----
+# Which comparison(s), kinase(s), and collection(s) to plot bubble plots for.
+# Default: TP53mt_vs_TP53wt comparison, CDK1 and CDK2 kinases, Hallmark collection.
+bubble_comparisons <- c("TP53mt_vs_TP53wt")
+bubble_kinases     <- c("CDK1", "CDK2")
+bubble_collections <- c("Hallmark")
+
+# To plot all combinations, uncomment the following lines:
+# bubble_comparisons <- comparisons$name
+# bubble_kinases     <- selected_kinases
+# bubble_collections <- NULL  # NULL = all collections used in ORA
+
+# Bubble plot color palette
+# Select a color gradient for bubble plot p.adjust mapping.
+# The gradient runs from low p.adjust (most significant) to high p.adjust.
+#
+# Available palettes:
+#   1 = NPG Red to Blue         : low="#E64B35", high="#4DBBD5" (default)
+#   2 = Lancet Red to Teal      : low="#ED0000", high="#0099B4"
+#   3 = NEJM Red to Blue        : low="#BC3C29", high="#0072B5"
+#   4 = JAMA Warm to Cool       : low="#DF8F44", high="#374E55"
+#   5 = JCO Gold to Blue        : low="#EFC000", high="#0073C2"
+#   6 = Viridis-inspired        : low="#FDE725", high="#440154"
+#   7 = Magma-inspired          : low="#FCFDBF", high="#000004"
+#   8 = Nature Red to Green     : low="#E64B35", high="#00A087"
+palette_bubble_choice <- 4  # Change this number to select bubble palette (1-8)
+
+bubble_palettes <- list(
+    c("#E64B35", "#4DBBD5"),  # 1: NPG Red to Blue
+    c("#ED0000", "#0099B4"),  # 2: Lancet Red to Teal
+    c("#BC3C29", "#0072B5"),  # 3: NEJM Red to Blue
+    c("#DF8F44", "#374E55"),  # 4: JAMA Warm to Cool
+    c("#EFC000", "#0073C2"),  # 5: JCO Gold to Blue
+    c("#FDE725", "#440154"),  # 6: Viridis-inspired
+    c("#FCFDBF", "#000004"),  # 7: Magma-inspired
+    c("#E64B35", "#00A087")   # 8: Nature Red to Green
+)
+
+bubble_color_low  <- bubble_palettes[[palette_bubble_choice]][1]
+bubble_color_high <- bubble_palettes[[palette_bubble_choice]][2]
+
+# Bubble plot output directory
+bubble_output_dir <- file.path(base_path,
+    "phosphoprotein_differential_analysis_without_protein_normalization_subgroup_adjusted",
+    "phosphoprotein_DPS_without_protein_normalization_meta_analysis",
+    "meta_KSEA", "leadingEdge_ORA", "ORA_bubble_plot")
+dir.create(bubble_output_dir, recursive = TRUE, showWarnings = FALSE)
+if (.Platform$OS.type == "windows") {
+    bubble_output_dir <- shortPathName(bubble_output_dir)
+}
 
 cat("====================================================================\n")
 cat("KSEA Leading Edge Substrates ORA (per kinase, separately)\n")
@@ -553,4 +605,182 @@ for (coll_name in names(all_summaries)) {
 cat("====================================================================\n")
 cat("KSEA Leading Edge ORA Pipeline Complete!\n")
 cat("All results saved to:", output_dir, "\n")
+cat("====================================================================\n\n")
+
+# ==============================================================================
+# Section 6: Bubble Plots for Selected ORA Results
+# ==============================================================================
+
+cat("====================================================================\n")
+cat("Generating ORA Bubble Plots\n")
+cat("====================================================================\n\n")
+
+cat("Bubble plot comparisons:", paste(bubble_comparisons, collapse = ", "), "\n")
+cat("Bubble plot kinases:", paste(bubble_kinases, collapse = ", "), "\n")
+cat("Bubble plot palette:", palette_bubble_choice, "->",
+    bubble_color_low, "(low) to", bubble_color_high, "(high)\n")
+cat("Bubble plot output:", bubble_output_dir, "\n\n")
+
+# Determine which collections to plot
+if (is.null(bubble_collections)) {
+    bubble_collections_final <- names(collections)
+} else {
+    bubble_collections_final <- intersect(bubble_collections, names(collections))
+}
+cat("Bubble plot collections:", paste(bubble_collections_final, collapse = ", "), "\n\n")
+
+# Prefix-to-strip mapping for cleaner pathway names in bubble plots
+collection_prefix_map <- list(
+    Hallmark           = "(?i)^hallmark[_ ]",
+    C2_CGP             = "(?i)^CGP[_ ]",
+    C2_CP_BIOCARTA     = "(?i)^biocarta[_ ]",
+    C2_CP_KEGG_LEGACY  = "(?i)^kegg[_ ]",
+    C2_CP_KEGG_MEDICUS = "(?i)^kegg[_ ]",
+    C2_CP_PID          = "(?i)^pid[_ ]",
+    C2_CP_REACTOME     = "(?i)^reactome[_ ]",
+    C2_CP_WIKIPATHWAYS = "(?i)^wp[_ ]",
+    C3_MIR_MIRDB       = "(?i)^mir[_ ]",
+    C3_MIR_MIR_LEGACY  = "(?i)^mir[_ ]",
+    C3_TFT_GTRD        = "(?i)^gtrd[_ ]",
+    C3_TFT_TFT_LEGACY  = "(?i)^tft[_ ]",
+    C4_3CA             = "(?i)^3ca[_ ]",
+    C4_CGN             = "(?i)^cgn[_ ]",
+    C4_CM              = "(?i)^cm[_ ]",
+    C5_GO_BP           = "(?i)^gobp[_ ]",
+    C5_GO_CC           = "(?i)^gocc[_ ]",
+    C5_GO_MF           = "(?i)^gomf[_ ]",
+    C6_Oncogenic       = "(?i)^oncogenic[_ ]"
+)
+
+bubble_count <- 0
+
+for (bp_comp in bubble_comparisons) {
+    for (bp_kinase in bubble_kinases) {
+        for (bp_coll in bubble_collections_final) {
+
+            cat("  Bubble plot:", bp_comp, "/", bp_kinase, "/", bp_coll, "\n")
+
+            # Locate the ORA CSV result file
+            ora_csv <- file.path(output_dir, bp_comp, bp_kinase, bp_coll,
+                                 paste0("ORA_", bp_kinase, "_", bp_comp, ".csv"))
+
+            if (!file.exists(ora_csv)) {
+                cat("    [SKIP] ORA result file not found:", basename(ora_csv), "\n")
+                next
+            }
+
+            res_df <- fread(ora_csv)
+
+            if (nrow(res_df) == 0) {
+                cat("    [SKIP] ORA result file is empty\n")
+                next
+            }
+
+            # Calculate numeric GeneRatio for plotting
+            res_df$GeneRatioNum <- sapply(res_df$GeneRatio, function(x) {
+                parts <- as.numeric(strsplit(as.character(x), "/")[[1]])
+                if (length(parts) == 2 && parts[2] != 0) parts[1] / parts[2] else 0
+            })
+
+            # Sort by p.adjust
+            res_df <- res_df[order(res_df$p.adjust), ]
+
+            # Identify significant rows (padj < 0.05)
+            sig_df <- res_df[res_df$p.adjust < 0.05, ]
+
+            # If significant pathways < 5, pad to 5. Otherwise keep up to 15.
+            if (nrow(sig_df) < 5) {
+                plot_df <- head(res_df, 5)
+            } else {
+                plot_df <- head(sig_df, 15)
+            }
+
+            if (nrow(plot_df) == 0) {
+                cat("    [SKIP] No data for bubble plot\n")
+                next
+            }
+
+            # Clean pathway names: remove collection prefix for cleaner plotting
+            prefix_pattern <- collection_prefix_map[[bp_coll]]
+            if (!is.null(prefix_pattern)) {
+                plot_df$Description <- gsub(prefix_pattern, "", plot_df$Description)
+            }
+
+            # Replace underscores with spaces for readability
+            plot_df$Description <- gsub("_", " ", plot_df$Description)
+
+            # Order Description factor by p.adjust (descending so smallest padj at top)
+            plot_df$Description <- factor(plot_df$Description,
+                                           levels = rev(plot_df$Description))
+
+            # Control plot title visibility
+            show_plot_title <- TRUE
+            plot_title_text <- if (show_plot_title) {
+                paste0(bp_coll, " ORA: ", bp_kinase, " (", bp_comp, ")")
+            } else {
+                NULL
+            }
+
+            # Bubble plot (custom ggplot, same style as reference script)
+            p <- ggplot(plot_df, aes(x = GeneRatioNum, y = Description)) +
+                geom_point(aes(size = Count, color = p.adjust)) +
+                scale_color_gradient(low = bubble_color_low, high = bubble_color_high,
+                                     name = "p.adjust") +
+                labs(title = plot_title_text, x = "GeneRatio", y = "") +
+                scale_x_continuous(expand = expansion(mult = 0.15)) +
+                scale_y_discrete(expand = expansion(mult = 0.1)) +
+                theme_bw() +
+                theme(
+                    panel.grid.major = element_blank(),
+                    panel.grid.minor = element_blank(),
+                    panel.border = element_blank(),
+                    panel.background = element_rect(fill = "white", color = NA),
+                    plot.background = element_rect(fill = "white", color = NA),
+                    axis.line = element_line(color = "black"),
+                    axis.text.y = element_text(size = 7, face = "bold", color = "black"),
+                    axis.text.x = element_text(size = 7, face = "bold", color = "black"),
+                    axis.title = element_text(size = 7, face = "bold", color = "black"),
+                    plot.title = element_text(size = 7, face = "bold", hjust = 0.5,
+                                              color = "black"),
+                    legend.position = "right",
+                    legend.box.margin = margin(0, 0, 0, 10),
+                    legend.title = element_text(size = 7, face = "bold", color = "black"),
+                    legend.text = element_text(size = 7, color = "black"),
+                    legend.key.size = unit(0.3, "cm")
+                )
+
+            if (!show_plot_title) {
+                p <- p + theme(plot.title = element_blank())
+            }
+
+            # Create comparison-level subdirectory within bubble_output_dir
+            bp_out_subdir <- file.path(bubble_output_dir, bp_comp)
+            dir.create(bp_out_subdir, recursive = TRUE, showWarnings = FALSE)
+
+            file_prefix <- paste0("ORA_bubble_", bp_kinase, "_", bp_coll, "_", bp_comp)
+
+            pdf(file.path(bp_out_subdir, paste0(file_prefix, ".pdf")),
+                width = 3.8, height = 2.5)
+            print(p)
+            dev.off()
+
+            tiff(file.path(bp_out_subdir, paste0(file_prefix, ".tiff")),
+                 width = 3.8, height = 2.5, units = "in", res = 300,
+                 compression = "lzw")
+            print(p)
+            dev.off()
+
+            cat("    Bubble plot saved: ", file_prefix, ".pdf/.tiff\n")
+            bubble_count <- bubble_count + 1
+        }
+    }
+}
+
+cat("\nTotal bubble plots generated:", bubble_count, "\n")
+cat("Bubble plots saved to:", bubble_output_dir, "\n")
+
+cat("====================================================================\n")
+cat("KSEA Leading Edge ORA + Bubble Plot Pipeline Complete!\n")
+cat("ORA results saved to:", output_dir, "\n")
+cat("Bubble plots saved to:", bubble_output_dir, "\n")
 cat("====================================================================\n")

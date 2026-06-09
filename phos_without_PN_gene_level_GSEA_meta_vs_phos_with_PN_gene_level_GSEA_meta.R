@@ -456,7 +456,7 @@ rm(all_gs, pathway_size_df)
 cat("  Loaded sizes for", length(pathway_size_lookup), "gene sets\n\n")
 
 # User can modify this vector to select which collections to plot
-collections_to_plot <- c("C2_CP_KEGG_LEGACY")
+collections_to_plot <- c("Hallmark")
 # "Hallmark",
 # "C2_CGP", "C2_CP_BIOCARTA", "C2_CP_KEGG_LEGACY", "C2_CP_KEGG_MEDICUS",
 # "C2_CP_PID", "C2_CP_REACTOME", "C2_CP_WIKIPATHWAYS",
